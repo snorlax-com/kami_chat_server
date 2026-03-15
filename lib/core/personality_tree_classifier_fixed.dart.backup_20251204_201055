@@ -1,0 +1,386 @@
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:kami_face_oracle/core/face_feature_extractor_fixed.dart';
+import 'package:kami_face_oracle/core/face_type_classifier.dart';
+import 'package:kami_face_oracle/core/personality_mapping_table.dart';
+import 'package:kami_face_oracle/core/deities.dart';
+import 'package:kami_face_oracle/core/deity.dart';
+import 'package:kami_face_oracle/core/personality_tree_classifier.dart';
+
+/// ✅ 完全修正版：性格診断分類器
+/// 
+/// 問題点の修正：
+/// 1. キャッシュ問題 → 毎回新しいインスタンスで実行
+/// 2. 非同期race condition → 同期処理に変更
+/// 3. 特徴抽出の正規化ミス → 修正版を使用
+/// 4. 判定閾値の最適化
+class PersonalityTreeClassifierFixed {
+  /// 診断を実行（完全修正版）
+  static PersonalityTreeDiagnosisResult diagnose(Face face) {
+    print('[PersonalityTreeClassifierFixed] START');
+    
+    // ✅ 修正: キャッシュをクリア
+    FaceFeatureExtractorFixed.clearCache();
+    
+    // 特徴抽出
+    double? browAngle;
+    double? browShape;
+    double? browThickness;
+    double? browLength;
+    double? glabellaWidth;
+    double? browEyeDistance;
+    double? eyeSize;
+    double? eyeShape;
+    double? mouthSize;
+    String? faceType;
+
+    try {
+      // ✅ 修正版の特徴抽出を使用
+      final browFeatures = FaceFeatureExtractorFixed.extractBrowFeaturesFixed(face);
+      final eyeFeatures = FaceFeatureExtractorFixed.extractEyeFeaturesFixed(face);
+      final rawMouthSize = FaceFeatureExtractorFixed.extractMouthSizeFixed(face);
+      
+      // デバッグログ
+      print('[PersonalityTreeClassifierFixed] 🔍 特徴抽出結果:');
+      print('[PersonalityTreeClassifierFixed]   - browAngle: ${browFeatures['angle']}');
+      print('[PersonalityTreeClassifierFixed]   - browShape: ${browFeatures['shape']}');
+      print('[PersonalityTreeClassifierFixed]   - browThickness: ${browFeatures['thickness']}');
+      print('[PersonalityTreeClassifierFixed]   - browLength: ${browFeatures['length']}');
+      print('[PersonalityTreeClassifierFixed]   - glabellaWidth: ${browFeatures['glabellaWidth']}');
+      print('[PersonalityTreeClassifierFixed]   - browEyeDistance: ${browFeatures['browEyeDistance']}');
+      print('[PersonalityTreeClassifierFixed]   - eyeSize: ${eyeFeatures['size']}');
+      print('[PersonalityTreeClassifierFixed]   - eyeShape: ${eyeFeatures['shape']}');
+      print('[PersonalityTreeClassifierFixed]   - mouthSize: $rawMouthSize');
+      
+      // ✅ 修正: Layer 1: 眉の角度（Python側と同じ調整を適用 - バランス改善版）
+      // ログ分析結果: rawAngleが小さい値（-0.1～0.1）に集中しているため、
+      // 調整ロジックを改善してより敏感に反応するようにする
+      final rawAngle = browFeatures['angle'] as double;
+      double adjustedAngle = rawAngle;
+      
+      // ✅ 修正: より敏感に反応するように調整ロジックを改善
+      // rawAngleの値が小さい場合でも、適切に拡大して判定閾値を超えられるようにする
+      if (rawAngle < -0.6) {
+        // 非常に負の値（右下がりが強い）→「小」を検出
+        adjustedAngle = rawAngle * 1.5;
+      } else if (rawAngle > 0.5) {
+        // 非常に正の値（右上がりが強い）→「大」を検出
+        adjustedAngle = rawAngle * 1.2;
+      } else if (rawAngle < -0.3) {
+        // 中程度の負の値→「小」に分類
+        adjustedAngle = rawAngle * 1.3; // 拡大率を上げる
+      } else if (rawAngle > 0.3) {
+        // 中程度の正の値→「大」に分類
+        adjustedAngle = rawAngle * 1.2; // 拡大率を上げる
+      } else if (rawAngle < -0.1) {
+        // 小さい負の値でも「小」に分類できるように拡大
+        adjustedAngle = rawAngle * 1.5; // 拡大して「小」を検出
+      } else if (rawAngle > 0.1) {
+        // 小さい正の値でも「大」に分類できるように拡大
+        adjustedAngle = rawAngle * 1.5; // 拡大して「大」を検出
+      } else {
+        // 非常に小さい値（-0.1 ～ 0.1）は「中」に分類
+        // 縮小せず、そのまま保持（またはわずかに縮小）
+        adjustedAngle = rawAngle * 0.8; // わずかに縮小して「中」の範囲に
+      }
+      browAngle = adjustedAngle.clamp(-1.0, 1.0);
+      
+      // デバッグログ
+      print('[PersonalityTreeClassifierFixed] Layer1角度調整: raw=$rawAngle → adjusted=$browAngle');
+      
+      // Layer 2: 眉の形状（0.0-1.0を-1.0〜1.0に変換）
+      final rawShape = browFeatures['shape'] as double;
+      browShape = (rawShape - 0.5) * 2.0; // 0.0-1.0 → -1.0〜1.0
+      
+      // Layer 3: 眉の濃さ（0.0-1.0を-1.0〜1.0に変換、中央値を0.5にシフトして分布を広げる）
+      final rawThickness = browFeatures['thickness'] as double;
+      // 中央値を0.5に変更し、分布を広げるために2倍に拡大
+      browThickness = ((rawThickness - 0.5) * 2.0).clamp(-1.0, 1.0);
+      
+      // Layer 4: 眉の長さ（0.0-1.0を-1.0〜1.0に変換、中央値を0.5にシフトして分布を広げる）
+      final rawLength = browFeatures['length'] as double;
+      // 中央値を0.5に変更し、分布を広げるために2倍に拡大
+      browLength = ((rawLength - 0.5) * 2.0).clamp(-1.0, 1.0);
+      
+      // Layer 5: 眉間の幅（0.0-1.0を-1.0〜1.0に変換、中央値を0.5にシフトして分布を広げる）
+      final rawGlabellaWidth = browFeatures['glabellaWidth'] as double;
+      // 中央値を0.5に変更し、分布を広げるために2倍に拡大
+      glabellaWidth = ((rawGlabellaWidth - 0.5) * 2.0).clamp(-1.0, 1.0);
+      
+      // Layer 6: 眉と目の距離（0.0-1.0の範囲を保持）
+      browEyeDistance = browFeatures['browEyeDistance'] as double;
+      
+      // Layer 7: 目の特徴（0.0-1.0の範囲を保持、中央値を0.5にシフトして分布を広げる）
+      final rawEyeSize = eyeFeatures['size'] as double;
+      // 中央値を0.5に変更し、分布を広げるために2倍に拡大
+      eyeSize = ((rawEyeSize - 0.5) * 2.0).clamp(0.0, 1.0);
+      
+      final rawEyeShape = eyeFeatures['shape'] as double;
+      // 中央値を0.5に変更し、分布を広げるために2倍に拡大
+      eyeShape = ((rawEyeShape - 0.5) * 2.0).clamp(0.0, 1.0);
+      
+      // Layer 8: 口の大きさ（0.0-1.0を-1.0〜1.0に変換、中央値を0.5にシフトして分布を広げる）
+      // 中央値を0.5に変更し、分布を広げるために2倍に拡大
+      mouthSize = ((rawMouthSize - 0.5) * 2.0).clamp(-1.0, 1.0);
+      
+      // Layer 9: 顔の型
+      final faceTypeResult = FaceTypeClassifier.classify(face);
+      faceType = faceTypeResult.faceType;
+      
+    } catch (e, stackTrace) {
+      print('[PersonalityTreeClassifierFixed] ❌ 特徴抽出エラー: $e');
+      print('[PersonalityTreeClassifierFixed] スタックトレース: ${stackTrace.toString().split("\n").take(5).join("\n")}');
+      return PersonalityTreeDiagnosisResult(
+        personalityType: 10,
+        personalityTypeName: 'エラー',
+        personalityDescription: '特徴抽出中にエラーが発生しました: $e',
+        hasError: true,
+        warnings: [
+          DiagnosisWarning(
+            type: 'error',
+            message: '特徴抽出エラー: $e',
+          ),
+        ],
+      );
+    }
+
+    // 必須チェック
+    if (browAngle == null || browShape == null || browThickness == null ||
+        browLength == null || glabellaWidth == null || browEyeDistance == null ||
+        eyeSize == null || eyeShape == null || mouthSize == null || faceType == null) {
+      return PersonalityTreeDiagnosisResult(
+        personalityType: 10,
+        personalityTypeName: 'エラー',
+        personalityDescription: '特徴抽出が不完全です。',
+        hasError: true,
+        warnings: [
+          DiagnosisWarning(
+            type: 'error',
+            message: '特徴抽出が不完全',
+          ),
+        ],
+      );
+    }
+
+    // 各層の判定
+    final layer1 = _judgeLayer1(browAngle);
+    final layer2 = _judgeLayer2(browShape);
+    final layer3 = _judgeLayer3(browThickness);
+    final layer4 = _judgeLayer4(browLength);
+    final layer5 = _judgeLayer5(glabellaWidth);
+    final layer6 = _judgeLayer6(browEyeDistance);
+    final layer7 = _judgeLayer7(eyeSize, eyeShape);
+    final layer8 = _judgeLayer8(mouthSize);
+    final layer9 = _judgeLayer9(faceType);
+    
+    print('[PersonalityTreeClassifierFixed] 📊 判定結果:');
+    print('[PersonalityTreeClassifierFixed]   - Layer1: $layer1');
+    print('[PersonalityTreeClassifierFixed]   - Layer2: $layer2');
+    print('[PersonalityTreeClassifierFixed]   - Layer3: $layer3');
+    print('[PersonalityTreeClassifierFixed]   - Layer4: $layer4');
+    print('[PersonalityTreeClassifierFixed]   - Layer5: $layer5');
+    print('[PersonalityTreeClassifierFixed]   - Layer6: $layer6');
+    print('[PersonalityTreeClassifierFixed]   - Layer7: $layer7');
+    print('[PersonalityTreeClassifierFixed]   - Layer8: $layer8');
+    print('[PersonalityTreeClassifierFixed]   - Layer9: $layer9');
+
+    // 層の値を数値化
+    final l1 = _layerValueToInt(layer1, layerNum: 1);
+    final l2 = _layerValueToInt(layer2, layerNum: 2);
+    final l3 = _layerValueToInt(layer3, layerNum: 3);
+    final l4 = _layerValueToInt(layer4, layerNum: 4);
+    final l5 = _layerValueToInt(layer5, layerNum: 5);
+    final l6 = _layerValueToInt(layer6, layerNum: 6);
+    final l7 = _layerValueToInt(layer7, layerNum: 7);
+    final l8 = _layerValueToInt(layer8, layerNum: 8);
+    final l9 = _faceTypeToInt(layer9);
+
+    // 組み合わせ番号を計算
+    final combinationNumber = _calculateCombinationNumber(l1, l2, l3, l4, l5, l6, l7, l8, l9);
+
+    // 性格タイプを分類
+    final personalityType = PersonalityMappingTable.getPersonalityType(
+      layer1, layer2, layer3, layer4, layer5, layer6, layer7, layer8, layer9,
+    );
+
+    final typeName = PersonalityMappingTable.getTypeName(personalityType);
+    final typeDescription = PersonalityMappingTable.getTypeDescription(personalityType);
+
+    if (typeName == null || typeDescription == null) {
+      return PersonalityTreeDiagnosisResult(
+        personalityType: 10,
+        personalityTypeName: 'エラー',
+        personalityDescription: '性格タイプの情報を取得できませんでした。',
+        hasError: true,
+        warnings: [],
+      );
+    }
+
+    return PersonalityTreeDiagnosisResult(
+      personalityType: personalityType,
+      personalityTypeName: typeName,
+      personalityDescription: typeDescription,
+      combinationNumber: combinationNumber,
+      hasError: false,
+      warnings: [],
+      layerResults: {
+        '第1層（眉の角度）': layer1,
+        '第2層（眉の形状）': layer2,
+        '第3層（眉の濃さ）': layer3,
+        '第4層（眉の長さ）': layer4,
+        '第5層（眉間の幅）': layer5,
+        '第6層（眉と目の距離）': layer6,
+        '第7層（目の形状）': layer7,
+        '第8層（口の大きさ）': layer8,
+        '第9層（顔の型）': layer9,
+      },
+      layerValues: {
+        '第1層（眉の角度）': browAngle,
+        '第2層（眉の形状）': browShape,
+        '第3層（眉の濃さ）': browThickness,
+        '第4層（眉の長さ）': browLength,
+        '第5層（眉間の幅）': glabellaWidth,
+        '第6層（眉と目の距離）': browEyeDistance,
+        '第7層（目の大きさ）': eyeSize,
+        '第7層（目の形状）': eyeShape,
+        '第8層（口の大きさ）': mouthSize,
+      },
+      layerReasons: {
+        '第1層（眉の角度）': '眉の角度: ${browAngle.toStringAsFixed(3)}',
+        '第2層（眉の形状）': '眉の形状: ${browShape.toStringAsFixed(3)}',
+        '第3層（眉の濃さ）': '眉の濃さ: ${browThickness.toStringAsFixed(3)}',
+        '第4層（眉の長さ）': '眉の長さ: ${browLength.toStringAsFixed(3)}',
+        '第5層（眉間の幅）': '眉間の幅: ${glabellaWidth.toStringAsFixed(3)}',
+        '第6層（眉と目の距離）': '眉と目の距離: ${browEyeDistance.toStringAsFixed(3)}',
+        '第7層（目の形状）': '目の大きさ: ${eyeSize.toStringAsFixed(3)}, 目の形状: ${eyeShape.toStringAsFixed(3)}',
+        '第8層（口の大きさ）': '口の大きさ: ${mouthSize.toStringAsFixed(3)}',
+        '第9層（顔の型）': '顔の型: $faceType',
+      },
+      decisionFlow: [
+        '第1層: $layer1',
+        '第2層: $layer2',
+        '第3層: $layer3',
+        '第4層: $layer4',
+        '第5層: $layer5',
+        '第6層: $layer6',
+        '第7層: $layer7',
+        '第8層: $layer8',
+        '第9層: $layer9',
+      ],
+      evidence: {
+        'faceType': faceType,
+        'mouthSize': mouthSize,
+      },
+    );
+  }
+
+  /// 第1層: 眉の角度を判定
+  /// ✅ 修正: 閾値をさらに緩和してより多様な結果を得る
+  static String _judgeLayer1(double value) {
+    // 調整後の値を使用（既に調整済み）
+    // ログ分析結果: adjustedAngleが小さい値に集中しているため、閾値をさらに緩和
+    if (value > 0.010) return '大（右上がり）'; // 0.15 → 0.05に変更
+    if (value < -0.010) return '小（右下がり）'; // -0.15 → -0.05に変更
+    return '中（水平）';
+  }
+
+  /// 第2層: 眉の形状を判定
+  static String _judgeLayer2(double value) {
+    final normalizedValue = (value + 1.0) / 2.0; // -1.0〜1.0 → 0.0-1.0
+    if (normalizedValue > 0.5) return '曲線';
+    return '直線';
+  }
+
+  /// 第3層: 眉の濃さを判定（正規化改善により閾値を調整）
+  static String _judgeLayer3(double value) {
+    // 正規化を改善したため、より適切な閾値を使用
+    if (value > 0.15) return '大（濃い）';
+    if (value < -0.15) return '小（淡い）';
+    return '中（標準的）';
+  }
+
+  /// 第4層: 眉の長さを判定（正規化改善により閾値を調整）
+  static String _judgeLayer4(double value) {
+    // 正規化を改善したため、より適切な閾値を使用
+    if (value > 0.15) return '大（長い）';
+    if (value < -0.15) return '小（短い）';
+    return '中（標準）';
+  }
+
+  /// 第5層: 眉間の幅を判定（正規化改善により閾値を調整）
+  static String _judgeLayer5(double value) {
+    // 正規化を改善したため、より適切な閾値を使用
+    if (value > 0.15) return '大（広い）';
+    if (value < -0.15) return '小（狭い）';
+    return '中（標準）';
+  }
+
+  /// 第6層: 眉と目の距離を判定
+  static String _judgeLayer6(double value) {
+    if (value > 0.245) return '大（離れている）';
+    if (value < -0.010) return '小（近い）';
+    return '中（標準）';
+  }
+
+  /// 第7層: 目の形状を判定
+  static String _judgeLayer7(double eyeSize, double eyeShape) {
+    if (eyeSize > 0.12 && eyeShape > 0.45) return '大（大きく丸い）';
+    if (eyeShape < 0.40 || (eyeSize < 0.12 && eyeShape < 0.45)) return '小（細く切れ長）';
+    return '中（標準）';
+  }
+
+  /// 第8層: 口の大きさを判定（正規化改善により閾値を調整）
+  static String _judgeLayer8(double value) {
+    // 正規化を改善したため、より適切な閾値を使用
+    if (value > 0.15) return '大（大きい）';
+    if (value < -0.15) return '小（小さい）';
+    return '中（標準）';
+  }
+
+  /// 第9層: 顔の型を判定
+  static String _judgeLayer9(String faceType) {
+    final supportedTypes = ['丸顔', '細長顔', '長方形顔', '台座顔', '卵顔', '四角顔', '逆三角形顔', '三角形顔'];
+    if (supportedTypes.contains(faceType)) {
+      return faceType;
+    }
+    return '卵顔';
+  }
+
+  /// 層の値を数値化
+  static int _layerValueToInt(String value, {int layerNum = 0}) {
+    if (layerNum == 2) {
+      if (value.contains('曲線')) return 1;
+      if (value.contains('直線')) return 0;
+      return 0;
+    }
+    if (value.contains('大')) return 2;
+    if (value.contains('中')) return 1;
+    if (value.contains('小')) return 0;
+    return 1;
+  }
+
+  /// 顔の型を数値化
+  static int _faceTypeToInt(String faceType) {
+    final faceTypeMap = {
+      '丸顔': 0, '卵顔': 1, '細長顔': 2, '逆三角形顔': 3,
+      '四角顔': 4, '台座顔': 5, '三角形顔': 6, '長方形顔': 7,
+    };
+    return faceTypeMap[faceType] ?? 1;
+  }
+
+  /// 組み合わせ番号を計算
+  static int _calculateCombinationNumber(int l1, int l2, int l3, int l4, int l5, int l6, int l7, int l8, int l9) {
+    int combination = 0;
+    combination += l1 * 11664;
+    combination += l2 * 5832;
+    combination += l3 * 1944;
+    combination += l4 * 648;
+    combination += l5 * 216;
+    combination += l6 * 72;
+    combination += l7 * 24;
+    combination += l8 * 8;
+    combination += l9;
+    return combination + 1;
+  }
+}
+
+
