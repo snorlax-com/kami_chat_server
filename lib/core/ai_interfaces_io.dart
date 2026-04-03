@@ -148,12 +148,11 @@ class SkinConditionClassifier {
           for (int i = 0; i < output.length && i < outputData.length; i++) {
             output[i] = outputData[i] as double;
           }
-        } else if (outputData is List) {
-          for (int i = 0; i < output.length && i < outputData.length; i++) {
-            output[i] = (outputData[i] as num).toDouble();
-          }
         } else {
-          print('[SkinConditionClassifier] 警告: 出力データ型が不明: ${outputData.runtimeType}');
+          final list = outputData as List;
+          for (int i = 0; i < output.length && i < list.length; i++) {
+            output[i] = (list[i] as num).toDouble();
+          }
         }
         print('[SkinConditionClassifier] ✅ 推論完了（解決案1成功）');
       } catch (e, stackTrace) {

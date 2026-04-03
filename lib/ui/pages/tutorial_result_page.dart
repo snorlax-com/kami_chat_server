@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/core/tutorial_classifier.dart';
 import 'package:kami_face_oracle/core/deity.dart';
-import 'package:kami_face_oracle/core/router_tree_classifier.dart';
 import 'package:kami_face_oracle/ui/pages/tutorial_comment_page.dart';
-import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 class TutorialResultPage extends StatefulWidget {
   final TutorialDiagnosisResult diagnosisResult;

@@ -164,26 +164,56 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
 
       // 開発者へGmail通知（メールブリッジ）。URL未設定時は本番URL or ローカルを使用
       final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
+      bool? mailSent;
       try {
         final mailService = AuraFaceChatMailService(baseUrl: savedUrl);
         final chatId = 'consultation_new_${userId}_${DateTime.now().millisecondsSinceEpoch}';
-        await mailService.send(
+        final mailRes = await mailService.send(
           userId: userId,
           chatId: chatId,
           message: _controller.text.trim(),
           userName: '占い相談ユーザー',
           userEmail: '',
         );
+        mailSent = mailRes.mailSent;
+        if (mounted && mailRes.success && mailRes.mailSent == false) {
+          final detail = mailRes.mailError != null && mailRes.mailError!.isNotEmpty
+              ? ' ${mailRes.mailError}'
+              : '';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '相談は送信しましたが、開発者へのGmail通知に失敗しました。サーバー（Render）のメール環境変数を確認してください。$detail',
+              ),
+              backgroundColor: Colors.deepOrange,
+              duration: const Duration(seconds: 8),
+            ),
+          );
+        }
       } catch (_) {}
 
       _controller.clear();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(urgent ? '至急相談を送信しました（消費: ${gemCost ?? 0} ジェム）' : '通常相談を送信しました（消費: $coinCost コイン）'),
-          ),
-        );
+        final coinLine = urgent
+            ? '至急相談を送信しました（消費: ${gemCost ?? 0} ジェム）'
+            : '通常相談を送信しました（消費: $coinCost コイン）';
+        if (mailSent == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(coinLine)),
+          );
+        } else if (mailSent == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '$coinLine。開発者へのメール通知はサーバー応答では確認できません。'
+                'kami-chat-server を最新にデプロイしてください。',
+              ),
+              backgroundColor: Colors.amber.shade800,
+              duration: const Duration(seconds: 10),
+            ),
+          );
+        }
       }
     } else {
       if (mounted) {

@@ -1,0 +1,28 @@
+# Render Blueprint: モノレポから kami_chat_server のみデプロイ
+# https://render.com/docs/monorepo-support#setting-a-root-directory
+#
+# ダッシュボードで既存サービスがある場合:
+#   Settings → Root Directory → kami_chat_server に変更して手動デプロイ
+#
+services:
+  - type: web
+    name: kami-chat-server
+    runtime: node
+    rootDir: kami_chat_server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      # 公開サービスURL（返信リンク用）。ダッシュボードのみ運用の場合も同値を設定してください。
+      - key: BASE_URL
+        value: https://kami-chat-server.onrender.com
+      - key: RESEND_API_KEY
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: TOKEN_SECRET
+        sync: false

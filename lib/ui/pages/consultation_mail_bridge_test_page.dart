@@ -88,11 +88,65 @@ class _ConsultationMailBridgeTestPageState extends State<ConsultationMailBridgeT
     setState(() => _isLoading = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok ? '接続できました' : '接続できません。通信環境をご確認ください。'),
+        content: Text(ok ? '接続できました' : '接続できません。通信環境をご確認ください。（初回は数十秒かかることがあります）'),
         backgroundColor: ok ? Colors.green : Colors.red,
         duration: const Duration(seconds: 4),
       ),
     );
+  }
+
+  /// 疎通確認: health → send(test-user, test-chat, テスト送信) → thread(test-chat)
+  Future<void> _runConnectivityTest() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    final logs = <String>[];
+    try {
+      final ok = await _service.testConnection();
+      logs.add('health: ${ok ? "OK" : "NG"}');
+      if (!ok) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('health NG'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+      const testChatId = 'test-chat';
+      final sendRes = await _service.send(
+        userId: 'test-user',
+        chatId: testChatId,
+        message: 'テスト送信',
+        userName: 'テストユーザー',
+      );
+      logs.add('send: ${sendRes.success ? "OK" : "NG ${sendRes.error}"}');
+      if (!sendRes.success) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('send NG: ${sendRes.error}'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+      final threadRes = await _service.getThread(chatId: testChatId);
+      logs.add('thread: ${threadRes.success ? "OK ${threadRes.messages.length}件" : "NG ${threadRes.error}"}');
+      if (mounted) {
+        for (final line in logs) debugPrint('[疎通テスト] $line');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(threadRes.success
+                ? '疎通OK: health→send→thread ${threadRes.messages.length}件'
+                : 'thread NG: ${threadRes.error}'),
+            backgroundColor: threadRes.success ? Colors.green : Colors.orange,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        if (threadRes.success && threadRes.messages.isNotEmpty) {
+          setState(() {
+            _chatId = testChatId;
+            _messages = List.from(threadRes.messages);
+            _lastCreatedAt = threadRes.messages.map((e) => e.createdAt).fold<int>(0, (int a, int b) => a > b ? a : b);
+          });
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _loadUserId() async {
@@ -161,24 +215,41 @@ class _ConsultationMailBridgeTestPageState extends State<ConsultationMailBridgeT
       });
       _controller.clear();
       _startPolling();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('送信しました。開発者Gmailに通知が届き、返信はこの画面に反映されます。'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      if (res.mailSent == false) {
+        final detail = res.mailError != null && res.mailError!.isNotEmpty
+            ? ' 詳細: ${res.mailError}'
+            : '';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'チャットはサーバーに保存しましたが、Gmail通知に失敗しました。'
+              'Render に RESEND_API_KEY / ADMIN_EMAIL / MAIL_FROM / BASE_URL を設定して再デプロイしてください。$detail',
+            ),
+            backgroundColor: Colors.deepOrange,
+            duration: const Duration(seconds: 10),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('送信しました。開発者Gmailに通知が届き、返信はこの画面に反映されます。'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
     } else {
-      final isNetworkError = res.error != null &&
-          (res.error!.contains('ネットワーク') ||
-              res.error!.contains('Connection') ||
-              res.error!.contains('Failed host'));
+      final err = res.error ?? '';
+      String message;
+      if (err.contains('タイムアウト')) {
+        message = '応答が遅れています。Render 無料枠は初回に数十秒かかることがあります。しばらくして再度お試しください。';
+      } else if (err.contains('通信不可') || err.contains('Connection') || err.contains('Failed host')) {
+        message = 'サーバーに接続できません。通信環境をご確認のうえ、しばらくして再度お試しください。';
+      } else {
+        message = '送信失敗: $err';
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isNetworkError
-                ? 'サーバーに接続できません。通信環境をご確認のうえ、しばらくして再度お試しください。'
-                : '送信失敗: ${res.error}',
-          ),
+          content: Text(message),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 5),
         ),
@@ -297,6 +368,16 @@ class _ConsultationMailBridgeTestPageState extends State<ConsultationMailBridgeT
                             ),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 6),
+                      OutlinedButton.icon(
+                        onPressed: _isLoading ? null : _runConnectivityTest,
+                        icon: const Icon(Icons.check_circle_outline, size: 18),
+                        label: const Text('疎通テスト (health→send→thread)'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.cyanAccent,
+                          side: BorderSide(color: Colors.cyanAccent.withOpacity(0.7)),
+                        ),
                       ),
                     ],
                   ),

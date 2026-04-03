@@ -101,6 +101,7 @@ class _ConsultationPageState extends State<ConsultationPage> {
     debugPrint('[Consultation] mail bridge savedUrl=$savedUrl effectiveUrl=$effectiveUrl');
 
     var mailSuccess = false;
+    bool? mailSentReport;
     try {
       final mailService = AuraFaceChatMailService(baseUrl: savedUrl);
       final chatId = 'consultation_${userId}_${DateTime.now().millisecondsSinceEpoch}';
@@ -111,8 +112,26 @@ class _ConsultationPageState extends State<ConsultationPage> {
         userName: '占い相談ユーザー',
         userEmail: '',
       );
-      debugPrint('[Consultation] mail send success=${res.success} error=${res.error}');
+      debugPrint(
+        '[Consultation] mail send success=${res.success} mailSent=${res.mailSent} error=${res.error} mailError=${res.mailError}',
+      );
       mailSuccess = res.success;
+      mailSentReport = res.mailSent;
+      if (res.success && res.mailSent == false && mounted) {
+        final detail = res.mailError != null && res.mailError!.isNotEmpty
+            ? '\n${res.mailError}'
+            : '';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'サーバーには保存されましたが、開発者へのGmail通知に失敗しました。'
+              'Render の環境変数（RESEND_API_KEY, ADMIN_EMAIL, MAIL_FROM, BASE_URL）を確認してください。$detail',
+            ),
+            backgroundColor: Colors.deepOrange,
+            duration: const Duration(seconds: 10),
+          ),
+        );
+      }
       if (!res.success && mounted) {
         final isLocalhostRefused = _isLocalhostUrl(mailService.baseUrl) &&
             (res.error?.contains('Connection refused') ?? false);
@@ -170,21 +189,45 @@ class _ConsultationPageState extends State<ConsultationPage> {
     }
 
     await _load();
-    if (mounted) {
-      if (useFirestore && mailSuccess) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${urgent ? '至急相談' : '通常相談'}を送信しました（消費: ${urgent ? (gemCost ?? 0) : coinCost} ${urgent ? 'ジェム' : 'コイン'}）。開発者に通知しました。',
+    if (mounted && mailSuccess) {
+      final coinLine =
+          '${urgent ? '至急相談' : '通常相談'}を送信しました（消費: ${urgent ? (gemCost ?? 0) : coinCost} ${urgent ? 'ジェム' : 'コイン'}）';
+      if (useFirestore) {
+        if (mailSentReport == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$coinLine。開発者に通知しました。'),
+              backgroundColor: Colors.green,
             ),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else if (!useFirestore && mailSuccess) {
+          );
+        } else if (mailSentReport == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '$coinLine。メール通知の成否はサーバーから返っていません。'
+                'Render の kami-chat-server を最新版にデプロイし、Resend 環境変数を設定してください。',
+              ),
+              backgroundColor: Colors.amber.shade800,
+              duration: const Duration(seconds: 10),
+            ),
+          );
+        }
+      } else if (mailSentReport == true) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('相談内容を開発者にメールで送りました。'),
             backgroundColor: Colors.green,
+          ),
+        );
+      } else if (mailSentReport == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'サーバーには送信できましたが、メール通知の実施は応答では確認できません。'
+              '本番のチャットサーバーが古い可能性があります。Render で最新コードをデプロイし、Resend 用の環境変数を設定してください。',
+            ),
+            backgroundColor: Colors.amber.shade800,
+            duration: Duration(seconds: 10),
           ),
         );
       }

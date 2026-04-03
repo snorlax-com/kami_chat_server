@@ -1,12 +1,22 @@
 {
   "name": "kami-chat-server",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=18"
+  },
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test:send-receive-send": "node scripts/send-receive-send-test.js",
+    "test:send-receive-send:prod": "node scripts/send-receive-send-test.js https://kami-chat-server.onrender.com",
+    "test:e2e": "node scripts/e2e-full-flow-test.js",
+    "test:render-smoke": "node scripts/render-production-smoke.js https://kami-chat-server.onrender.com",
+    "test:local-all": "bash scripts/run-local-e2e.sh"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.18.2"
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "resend": "^4.0.1"
   }
 }
