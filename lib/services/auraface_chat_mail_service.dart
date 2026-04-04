@@ -4,6 +4,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/mail_bridge_config.dart';
 
 /// Render 無料枠の初回遅延を考慮したタイムアウト（秒）
@@ -78,12 +79,14 @@ class AuraFaceChatMailService {
   }
 
   /// ユーザーメッセージを送信。サーバーが success:true または status が ok/received/saved_but_mail_failed で成功とみなす。
+  /// [consultationType] … `ConsultationMailType.normal` / `priorityGuidance`。未指定時は通常相談。
   Future<SendChatResponse> send({
     required String userId,
     required String chatId,
     required String message,
     String? userEmail,
     String? userName,
+    String? consultationType,
   }) async {
     final uri = Uri.parse('$baseUrl/api/chat/send');
     final bodyMap = {
@@ -92,6 +95,7 @@ class AuraFaceChatMailService {
       'userEmail': userEmail ?? '',
       'userName': userName ?? 'ユーザー',
       'message': message,
+      'consultationType': consultationType ?? ConsultationMailType.normal,
     };
     final bodyStr = jsonEncode(bodyMap);
     try {
@@ -195,12 +199,21 @@ class AuraFaceChatMailService {
           return ThreadResponse(success: true, chatId: body['chatId'] as String? ?? chatId, messages: []);
         }
         final messages = (list as List<dynamic>)
-            .map((m) => BridgeChatMessage(
-                  id: m['id'] as int? ?? 0,
-                  role: m['role'] as String? ?? 'user',
-                  text: m['text'] as String? ?? '',
-                  createdAt: m['createdAt'] is int ? m['createdAt'] as int : 0,
-                ))
+            .map((m) {
+              final raw = m['createdAt'];
+              final ts = raw is int
+                  ? raw
+                  : raw is num
+                      ? raw.toInt()
+                      : 0;
+              final mid = m['id'];
+              return BridgeChatMessage(
+                id: mid is int ? mid : (mid is num ? mid.toInt() : 0),
+                role: m['role'] as String? ?? 'user',
+                text: m['text'] as String? ?? '',
+                createdAt: ts,
+              );
+            })
             .toList();
         messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
         return ThreadResponse(

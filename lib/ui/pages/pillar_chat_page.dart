@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kami_face_oracle/models/personality_type_detail.dart';
 import 'package:kami_face_oracle/services/personality_type_detail_service.dart';
-import 'package:kami_face_oracle/core/storage.dart';
-import 'package:kami_face_oracle/core/deities.dart';
+import 'package:kami_face_oracle/config/consultation_mail_types.dart';
+import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
+import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 
 /// 柱とのチャットページ
 class PillarChatPage extends StatefulWidget {
@@ -27,6 +29,7 @@ class _PillarChatPageState extends State<PillarChatPage> {
   String? _pillarTitle;
   List<ChatMessage> _messages = [];
   bool _isLoading = true;
+  bool _sendingToDeveloper = false;
 
   @override
   void initState() {
@@ -102,9 +105,9 @@ class _PillarChatPageState extends State<PillarChatPage> {
     }
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _sendingToDeveloper) return;
 
     setState(() {
       _messages.add(ChatMessage(
@@ -116,7 +119,6 @@ class _PillarChatPageState extends State<PillarChatPage> {
 
     _messageController.clear();
 
-    // スクロールを最下部に
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -127,8 +129,71 @@ class _PillarChatPageState extends State<PillarChatPage> {
       }
     });
 
-    // TODO: サーバーにメッセージを送信して応答を取得
-    // 現在はプレースホルダーとして、後で実装
+    setState(() => _sendingToDeveloper = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      var userId = prefs.getString('user_id') ?? 'user_${DateTime.now().millisecondsSinceEpoch}';
+      if (!prefs.containsKey('user_id')) {
+        await prefs.setString('user_id', userId);
+      }
+      final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
+      final mailService = AuraFaceChatMailService(baseUrl: savedUrl);
+      final chatId = 'pillar_tutorial_${userId}_t${widget.personalityType}';
+      final pillar = _pillarTitle?.trim().isNotEmpty == true ? _pillarTitle!.trim() : '柱チャット';
+      final payload = '[チュートリアル｜$pillar]\n\n$text';
+      final res = await mailService.send(
+        userId: userId,
+        chatId: chatId,
+        message: payload,
+        userName: 'チュートリアル（柱チャット）',
+        userEmail: '',
+        consultationType: ConsultationMailType.normal,
+      );
+      if (res.success) {
+        await DeveloperChatPref.setActiveChatId(chatId);
+      }
+      if (!mounted) return;
+      if (res.success && res.mailSent == false) {
+        final detail = res.mailError != null && res.mailError!.isNotEmpty ? '\n${res.mailError}' : '';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'メッセージは保存されましたが、開発者へのGmail通知に失敗しました。サーバー環境を確認してください。$detail',
+            ),
+            backgroundColor: Colors.deepOrange,
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      } else if (!res.success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('開発者への送信に失敗しました: ${res.error ?? "不明"}'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('開発者にメッセージを送りました。「開発者とのやりとり」で返信を確認できます。'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('開発者への通知エラー: $e'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sendingToDeveloper = false);
+    }
   }
 
   @override
@@ -256,8 +321,17 @@ class _PillarChatPageState extends State<PillarChatPage> {
                             shape: BoxShape.circle,
                           ),
                           child: IconButton(
-                            onPressed: _sendMessage,
-                            icon: const Icon(Icons.send, color: Colors.white),
+                            onPressed: _sendingToDeveloper ? null : () => _sendMessage(),
+                            icon: _sendingToDeveloper
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.send, color: Colors.white),
                             padding: const EdgeInsets.all(12),
                           ),
                         ),

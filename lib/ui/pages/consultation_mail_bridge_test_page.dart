@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -115,6 +116,7 @@ class _ConsultationMailBridgeTestPageState extends State<ConsultationMailBridgeT
         chatId: testChatId,
         message: 'テスト送信',
         userName: 'テストユーザー',
+        consultationType: ConsultationMailType.normal,
       );
       logs.add('send: ${sendRes.success ? "OK" : "NG ${sendRes.error}"}');
       if (!sendRes.success) {
@@ -198,6 +200,7 @@ class _ConsultationMailBridgeTestPageState extends State<ConsultationMailBridgeT
       message: text,
       userName: 'テストユーザー',
       userEmail: 'test@example.com',
+      consultationType: ConsultationMailType.normal,
     );
 
     setState(() => _isLoading = false);

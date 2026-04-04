@@ -5,7 +5,10 @@ import 'package:kami_face_oracle/core/storage.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
 import 'package:kami_face_oracle/services/currency_service.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
+import 'package:kami_face_oracle/config/consultation_mail_types.dart';
+import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
+import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
 
 class ConsultationPage extends StatefulWidget {
   const ConsultationPage({super.key});
@@ -111,12 +114,17 @@ class _ConsultationPageState extends State<ConsultationPage> {
         message: _controller.text.trim(),
         userName: '占い相談ユーザー',
         userEmail: '',
+        consultationType:
+            urgent ? ConsultationMailType.priorityGuidance : ConsultationMailType.normal,
       );
       debugPrint(
         '[Consultation] mail send success=${res.success} mailSent=${res.mailSent} error=${res.error} mailError=${res.mailError}',
       );
       mailSuccess = res.success;
       mailSentReport = res.mailSent;
+      if (res.success) {
+        await DeveloperChatPref.setActiveChatId(chatId);
+      }
       if (res.success && res.mailSent == false && mounted) {
         final detail = res.mailError != null && res.mailError!.isNotEmpty
             ? '\n${res.mailError}'
@@ -238,7 +246,21 @@ class _ConsultationPageState extends State<ConsultationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('占い相談')),
+      appBar: AppBar(
+        title: const Text('占い相談'),
+        actions: [
+          IconButton(
+            tooltip: '開発者とのやりとり',
+            icon: const Icon(Icons.forum_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DeveloperChatPage()),
+              );
+            },
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

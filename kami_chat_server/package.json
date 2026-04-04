@@ -11,7 +11,8 @@
     "test:send-receive-send:prod": "node scripts/send-receive-send-test.js https://kami-chat-server.onrender.com",
     "test:e2e": "node scripts/e2e-full-flow-test.js",
     "test:render-smoke": "node scripts/render-production-smoke.js https://kami-chat-server.onrender.com",
-    "test:local-all": "bash scripts/run-local-e2e.sh"
+    "test:local-all": "bash scripts/run-local-e2e.sh",
+    "test:consultation-mail": "node --test test/consultation-notification.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

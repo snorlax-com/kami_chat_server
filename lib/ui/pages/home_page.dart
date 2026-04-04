@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:kami_face_oracle/core/storage.dart';
 import 'package:kami_face_oracle/ui/pages/capture_page.dart';
 import 'package:kami_face_oracle/ui/pages/collection_page.dart';
 import 'package:kami_face_oracle/ui/pages/tutorial_yosen_page.dart';
-import 'package:kami_face_oracle/ui/widgets/primary_button.dart';
 import 'package:kami_face_oracle/core/deities.dart';
 import 'package:kami_face_oracle/core/deity.dart';
 import 'package:kami_face_oracle/ui/pages/gacha_page.dart';
@@ -15,6 +15,8 @@ import 'package:kami_face_oracle/pages/history_page.dart' as legacy_history;
 import 'package:kami_face_oracle/services/currency_service.dart';
 import 'package:kami_face_oracle/ui/pages/test_radar_chart_page.dart';
 import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
+import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
+import 'package:kami_face_oracle/services/developer_chat_unread_service.dart';
 import 'package:kami_face_oracle/ui/pages/all_pillars_gallery_page.dart';
 import 'package:kami_face_oracle/features/consent/consent_service.dart';
 import 'package:kami_face_oracle/features/consent/widgets/biometric_consent_modal.dart';
@@ -29,28 +31,49 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   int _point = 0; // 既存ポイント
   int _coins = 0;
   int _gems = 0;
   int _fragments = 0;
   Deity? _tutorialDeity; // チュートリアルで選ばれた神
   late AnimationController _glowController;
+  bool _devReplyUnread = false;
+  Timer? _unreadPollTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _glowController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
     )..repeat();
+    _unreadPollTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshDevUnread());
+    _refreshDevUnread();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _unreadPollTimer?.cancel();
     _glowController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshDevUnread();
+    }
+  }
+
+  Future<void> _refreshDevUnread() async {
+    final u = await DeveloperChatUnreadService.hasUnreadReply();
+    if (mounted && _devReplyUnread != u) {
+      setState(() => _devReplyUnread = u);
+    }
   }
 
   @override
@@ -478,6 +501,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     children: [
                       Expanded(
                         child: _FeatureCard(
+                          key: const Key('e2e-developer-chat'),
+                          icon: Icons.forum_outlined,
+                          title: '開発者とのやりとり',
+                          subtitle: '返信の確認・追記',
+                          color: const Color(0xFF38BDF8),
+                          showUnreadDot: _devReplyUnread,
+                          onPressed: () async {
+                            await Navigator.push<void>(
+                              context,
+                              MaterialPageRoute(builder: (_) => const DeveloperChatPage()),
+                            );
+                            if (!context.mounted) return;
+                            _refreshDevUnread();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _FeatureCard(
                           icon: Icons.store,
                           title: 'ストア',
                           subtitle: 'アイテム',
@@ -802,6 +848,7 @@ class _FeatureCard extends StatelessWidget {
   final String subtitle;
   final Color color;
   final VoidCallback onPressed;
+  final bool showUnreadDot;
 
   const _FeatureCard({
     super.key,
@@ -810,6 +857,7 @@ class _FeatureCard extends StatelessWidget {
     required this.subtitle,
     required this.color,
     required this.onPressed,
+    this.showUnreadDot = false,
   });
 
   @override
@@ -818,70 +866,97 @@ class _FeatureCard extends StatelessWidget {
       button: true,
       label: '$title。$subtitle。',
       hint: 'ダブルタップで開く',
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              color.withOpacity(0.2),
-              color.withOpacity(0.1),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: color.withOpacity(0.4),
-            width: 1.5,
-          ),
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onPressed,
-            borderRadius: BorderRadius.circular(16),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(icon, color: color, size: 24),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.8,
-                      shadows: [
-                        Shadow(
-                          color: color.withOpacity(0.6),
-                          blurRadius: 8,
-                          offset: const Offset(0, 0),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.7),
-                      fontSize: 12,
-                    ),
-                  ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  color.withOpacity(0.2),
+                  color.withOpacity(0.1),
                 ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: color.withOpacity(0.4),
+                width: 1.5,
+              ),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onPressed,
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(icon, color: color, size: 24),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.8,
+                          shadows: [
+                            Shadow(
+                              color: color.withOpacity(0.6),
+                              blurRadius: 8,
+                              offset: const Offset(0, 0),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-        ),
+          if (showUnreadDot)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IgnorePointer(
+                child: Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.red.withOpacity(0.45),
+                        blurRadius: 6,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

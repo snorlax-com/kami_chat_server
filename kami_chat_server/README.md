@@ -13,6 +13,17 @@
 
 アプリ（Flutter）は `POST /api/chat/send` でここに相談を送り、**Resend** 経由で開発者の **Gmail（ADMIN_EMAIL）** に通知します。
 
+### 相談種別（consultationType）
+
+| 値 | 意味 | メール件名の傾向 |
+|----|------|------------------|
+| `normal`（省略時もこれ） | 通常相談 | `[AuraFace] 新しい相談が届きました` |
+| `priority_guidance` | 優先導き（至急） | `【要確認】【優先導き】2時間以内対応｜AuraFace …` |
+
+- 件名・HTML/テキスト本文は **`mail/buildConsultationNotification.js`** が種別で切り替えます。
+- テンプレート: `mail/templates/normalConsultation.js`, `mail/templates/priorityGuidance.js`
+- Gmail でのフィルタ・通知の設定手順: リポジトリ **`docs/gmail_notification_setup.md`**
+
 ## Gmail が届かないとき
 
 1. **このリポジトリの最新版を Render に再デプロイ**しているか確認してください（メール送信はサーバー側コードが必要です）。
@@ -42,4 +53,10 @@ node index.js
 
 ```bash
 node scripts/send-receive-send-test.js http://127.0.0.1:3000
+```
+
+相談通知メールの件名・本文組み立てのみ（Resend 不要）:
+
+```bash
+npm run test:consultation-mail
 ```
