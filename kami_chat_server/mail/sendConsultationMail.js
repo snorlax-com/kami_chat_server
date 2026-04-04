@@ -76,17 +76,27 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
     console.log("[sendConsultationMail][NORMAL]", { subject, fromDisplay, consultationType });
   }
 
-  /** Gmail は独自の「重要」判定だが、一覧・一部クライアントで差が付きやすいヘッダー */
+  /**
+   * Gmail の自動「重要」は送信側では保証できないが、一覧・通知・フィルタで差を付けやすいヘッダーを付与。
+   * List-Id は Gmail 検索 `list:…` やフィルタ条件に使える。
+   */
   const headers = isPriority
     ? {
         Importance: "high",
+        Priority: "urgent",
         "X-Priority": "1",
         "X-MSMail-Priority": "High",
+        "List-Id": "<fortune-urgent.consultations.auraface>",
+        "X-AuraFace-Consultation": "priority_guidance",
+        "X-AuraFace-Urgency": "fortune-consultation-urgent",
       }
     : {
         Importance: "normal",
+        Priority: "non-urgent",
         "X-Priority": "3",
         "X-MSMail-Priority": "Normal",
+        "List-Id": "<normal.consultations.auraface>",
+        "X-AuraFace-Consultation": "normal",
       };
 
   const result = await getResend().emails.send({

@@ -2,7 +2,7 @@
 // チャットAPI（POST /api/chat/send, GET /api/chat/thread）本番: https://kami-chat-server.onrender.com
 
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode, kReleaseMode;
 import 'package:http/http.dart' as http;
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/mail_bridge_config.dart';
@@ -46,8 +46,37 @@ class AuraFaceChatMailService {
     return u.endsWith('/') ? u.substring(0, u.length - 1) : u;
   }
 
+  /// 占い相談の Gmail 通知先。
+  /// リリースでは [productionBaseUrl]（`kMailBridgeProductionUrl` 等）を常に使い、
+  /// 開発用に保存した古いブリッジ URL へ送って「至急が通常メール」になるのを防ぐ。
+  static String consultationSendBaseUrl(String? savedPrefUrl) {
+    if (kReleaseMode) {
+      final p = productionBaseUrl;
+      if (p != null && p.trim().isNotEmpty) {
+        return _normalizeBaseUrl(p.trim());
+      }
+      return effectiveDefaultBaseUrl;
+    }
+    final s = savedPrefUrl?.trim() ?? '';
+    if (s.isNotEmpty) return _normalizeBaseUrl(s);
+    return effectiveDefaultBaseUrl;
+  }
+
   static void _log(String msg) {
     if (kDebugMode) debugPrint(msg);
+  }
+
+  /// JSON / 中間プロキシで bool が文字列や数値になる場合の吸収
+  static bool? _coerceBool(dynamic v) {
+    if (v == null) return null;
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    if (v is String) {
+      final s = v.trim().toLowerCase();
+      if (s == 'true' || s == '1' || s == 'yes') return true;
+      if (s == 'false' || s == '0' || s == 'no') return false;
+    }
+    return null;
   }
 
   /// エラー種別を分かりやすく分類
@@ -127,35 +156,25 @@ class AuraFaceChatMailService {
       if (success) {
         final mid = body['messageId'];
         final messageId = mid is int ? mid : (mid is num ? mid.toInt() : null);
-        final ms = body['mailSent'];
-        final bool? mailSent = ms is bool
-            ? ms
-            : ms is String
-                ? (ms.toLowerCase() == 'true'
-                    ? true
-                    : ms.toLowerCase() == 'false'
-                        ? false
-                        : null)
-                : null;
+        final mailSent = _coerceBool(body['mailSent']);
         final mailErr = body['error']?.toString();
         _log('[MailBridge] send mailSent=$mailSent error=$mailErr');
-        final mu = body['mailUrgent'];
-        final bool? mailUrgent = mu is bool
-            ? mu
-            : mu is String
-                ? (mu.toLowerCase() == 'true'
-                    ? true
-                    : mu.toLowerCase() == 'false'
-                        ? false
-                        : null)
-                : null;
+        var mailUrgent = _coerceBool(body['mailUrgent']);
+        final ct = body['consultationType']?.toString().trim();
+        if (mailUrgent == null && ct != null && ct.isNotEmpty) {
+          if (ct == ConsultationMailType.priorityGuidance) {
+            mailUrgent = true;
+          } else if (ct == ConsultationMailType.normal) {
+            mailUrgent = false;
+          }
+        }
         return SendChatResponse(
           success: true,
           chatId: body['chatId'] as String? ?? chatId,
           messageId: messageId,
           mailSent: mailSent,
           mailError: (mailSent == false && mailErr != null && mailErr.isNotEmpty) ? mailErr : null,
-          consultationType: body['consultationType'] as String?,
+          consultationType: ct,
           mailUrgent: mailUrgent,
           mailSubject: body['mailSubject'] as String?,
           mailFromDisplay: body['mailFromDisplay'] as String?,
@@ -291,7 +310,7 @@ class SendChatResponse {
   /// メールの差出人表示名（MAIL_FROM の表示名差し替え後）。
   final String? mailFromDisplay;
 
-  /// サーバー実装世代。`v2-consultation-tier` なら種別・件名エコー対応。
+  /// サーバー実装世代。`v2-consultation-tier` 接頭辞なら種別・件名エコー対応。
   final String? mailApiBuild;
 
   SendChatResponse({

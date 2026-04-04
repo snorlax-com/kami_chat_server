@@ -18,7 +18,7 @@
 | 値 | 意味 | 差出人表示名（例） | メール件名の傾向 |
 |----|------|-------------------|------------------|
 | `normal`（省略時もこれ） | 通常相談 | `AuraFace｜通常相談` | `[AuraFace] 新しい相談が届きました` |
-| `priority_guidance` | 優先導き（至急） | `【緊急】優先導き・AuraFace` | `【緊急】【優先導き】2時間以内要対応｜AuraFace …` |
+| `priority_guidance` | 優先導き（至急） | `至急占い相談｜AuraFace【優先導き】` | `【至急占い・緊急】2時間以内要対応｜優先導き｜AuraFace …` |
 
 - 件名・HTML/テキスト本文は **`mail/buildConsultationNotification.js`** が種別で切り替えます。送信時の **From 表示名・メールヘッダー** は **`mail/sendConsultationMail.js`** で切り替えます。
 - テンプレート: `mail/templates/normalConsultation.js`, `mail/templates/priorityGuidance.js`
@@ -37,8 +37,18 @@
 | `BASE_URL` | **このサービスの公開 URL**（末尾スラッシュなし）。例: `https://kami-chat-server.onrender.com`。メール内「返信ページを開く」リンクに使います。 |
 | `TOKEN_SECRET` | 本番では長いランダム文字列（返信リンクの署名用） |
 | `TOKEN_EXPIRES_HOURS` | 任意。デフォルト 168（7日） |
+| `CONSULTATION_URGENT_JST_HOUR_START` | 任意。**至急**を JST の時刻帯に限定するときのみ、`END` とセットで 0–23。未設定なら **24 時間**受付。 |
+| `CONSULTATION_URGENT_JST_HOUR_END` | 任意。上とセット（例: `10` と `23` で 10:00–23:59）。片方だけでは無効。 |
 
 未設定の場合も `POST /api/chat/send` は **200** でチャットはメモリに保存されますが、レスポンスは `mailSent: false` / `status: "saved_but_mail_failed"` になります。アプリはオレンジの SnackBar で知らせます。
+
+至急が時間外のとき（上記 `START`/`END` を**両方**設定した場合のみ）、`priority_guidance` は **403**、`status: "error"` で拒否されます（メモリにも保存しません）。
+
+### 至急なのに Gmail が「通常相談」になるとき
+
+1. **Render** の Web Service で **Root Directory** が `kami_chat_server` になっているか、**Manual Deploy** で最新コミットが載っているか確認する（古い `index.js` だと `consultationType` が無視される）。
+2. ログの `[chat/send] consultationType` で `raw` / `normalized` が `priority_guidance` か確認する。`[sendConsultationMail][URGENT]` が出ていれば Resend まで至急テンプレで送っている。
+3. Flutter **リリース**は `kMailBridgeProductionUrl` 固定でこのサービスに送る。実機で以前「接続先を設定」した URL は占い相談では使われない。
 
 ## ローカル
 

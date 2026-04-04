@@ -3,12 +3,26 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kami_face_oracle/core/storage.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
-import 'package:kami_face_oracle/services/currency_service.dart';
+import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
 import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
+
+/// Firestore 等で bool が混在しても履歴の「至急」表示を安定させる
+bool _coerceUrgentFlag(dynamic v) {
+  if (v == true) return true;
+  if (v == false) return false;
+  if (v == 1) return true;
+  if (v == 0) return false;
+  if (v is String) {
+    final s = v.trim().toLowerCase();
+    if (s == 'true' || s == '1') return true;
+    if (s == 'false' || s == '0') return false;
+  }
+  return false;
+}
 
 /// サーバー応答と至急ボタンの一致をユーザーに示す（Render 未更新時の切り分け用）
 void _showMailSentFeedback(
@@ -21,11 +35,14 @@ void _showMailSentFeedback(
 }) {
   if (!mailSent) return;
 
-  final v2 = bridge?.mailApiBuild == 'v2-consultation-tier';
-  final serverUrgent = bridge?.mailUrgent == true;
-  final serverNormal = bridge?.mailUrgent == false;
+  final v2 = (bridge?.mailApiBuild ?? '').trim().startsWith('v2-consultation-tier');
+  final ct = (bridge?.consultationType ?? '').trim();
+  final serverPriority =
+      bridge?.mailUrgent == true || ct == ConsultationMailType.priorityGuidance;
+  final explicitServerNormal = bridge?.mailUrgent == false ||
+      (ct == ConsultationMailType.normal && bridge?.mailUrgent != true);
 
-  if (urgent && v2 && serverNormal) {
+  if (urgent && v2 && explicitServerNormal && !serverPriority) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -45,8 +62,8 @@ void _showMailSentFeedback(
       SnackBar(
         content: Text(
           '$coinLine。メールは送信されました。\n'
-          'サーバーが古い応答形式のため、Gmail に【緊急】が付いているか自動では確認できません。'
-          '件名に「【緊急】」が無い場合は kami-chat-server（Render）を最新コードで再デプロイしてください。',
+          'サーバーが古い応答形式のため、Gmail に「至急占い」件名になっているか自動では確認できません。'
+          '件名が「【至急占い・緊急】」で始まらない場合は kami-chat-server（Render）を最新コードで再デプロイしてください。',
         ),
         backgroundColor: Colors.amber.shade800,
         duration: const Duration(seconds: 12),
@@ -55,8 +72,8 @@ void _showMailSentFeedback(
     return;
   }
 
-  final extraUrgent = urgent && serverUrgent
-      ? ' Gmailでは件名が「【緊急】」で始まり、差出人に「【緊急】」が含まれます。'
+  final extraUrgent = urgent && serverPriority
+      ? ' Gmailでは件名が「【至急占い・緊急】」で始まり、差出人は「至急占い相談｜…」です（通常の「[AuraFace] 新しい相談」と一覧が別になります）。'
       : '';
 
   if (useFirestore) {
@@ -88,8 +105,9 @@ class ConsultationPage extends StatefulWidget {
 class _ConsultationPageState extends State<ConsultationPage> {
   final _controller = TextEditingController();
   int _point = 0;
-  int _coins = 0;
-  int _gems = 0;
+  int _normalTickets = 0;
+  int _priorityTickets = 0;
+  int _urgentSlotsLeft = 5;
   List<Map<String, dynamic>> _history = [];
 
   @override
@@ -112,12 +130,15 @@ class _ConsultationPageState extends State<ConsultationPage> {
 
   Future<void> _load() async {
     final p = await Storage.getPoint();
-    final wallet = await CurrencyService.load();
+    final n = await ConsultationTicketService.normalTickets();
+    final pr = await ConsultationTicketService.priorityTickets();
+    final left = await ConsultationTicketService.urgentSlotsRemainingToday();
     final hist = await CloudService.getConsultations();
     setState(() {
       _point = p;
-      _coins = wallet['coins']!;
-      _gems = wallet['gems']!;
+      _normalTickets = n;
+      _priorityTickets = pr;
+      _urgentSlotsLeft = left;
       _history = hist;
     });
   }
@@ -128,39 +149,45 @@ class _ConsultationPageState extends State<ConsultationPage> {
         u.startsWith('https://127.0.0.1') || u.startsWith('https://localhost');
   }
 
-  Future<void> _send({required bool urgent, required int coinCost, int? gemCost}) async {
+  Future<void> _send({required bool urgent}) async {
     if (_controller.text.trim().isEmpty) return;
 
     final useFirestore = CloudService.isAvailable;
 
-    // Firestore が使える場合のみコイン/ジェムを消費してFirestoreに保存
-    if (useFirestore) {
-    if (urgent && gemCost != null) {
-      if (_gems < gemCost) {
+    if (urgent) {
+      final ticketErr = await ConsultationTicketService.validateUrgentSend();
+      if (ticketErr != null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('ジェムが不足しています')),
+            SnackBar(content: Text(ticketErr), backgroundColor: Colors.orange.shade800),
           );
         }
         return;
       }
-      await CurrencyService.useGems(gemCost);
     } else {
-      if (_coins < coinCost) {
+      final ticketErr = await ConsultationTicketService.validateNormalSend();
+      if (ticketErr != null) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('コインが不足しています')),
+            SnackBar(content: Text(ticketErr), backgroundColor: Colors.orange.shade800),
           );
         }
         return;
       }
-      await CurrencyService.useCoins(coinCost);
     }
-    await CloudService.addConsultation(
-      _controller.text.trim(),
-      urgent: urgent,
-      cost: urgent ? (gemCost ?? 0) : coinCost,
-    );
+
+    if (useFirestore) {
+      await CloudService.addConsultation(
+        _controller.text.trim(),
+        urgent: urgent,
+        cost: 1,
+      );
+    }
+
+    if (urgent) {
+      await ConsultationTicketService.consumeUrgentSend();
+    } else {
+      await ConsultationTicketService.consumeNormalTicket();
     }
 
     // 相談ボタンを押したら必ず開発者へGmail通知（メールブリッジ）
@@ -168,14 +195,14 @@ class _ConsultationPageState extends State<ConsultationPage> {
     final userId = prefs.getString('user_id') ?? 'user_${DateTime.now().millisecondsSinceEpoch}';
     if (!prefs.containsKey('user_id')) await prefs.setString('user_id', userId);
     final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
-    final effectiveUrl = savedUrl ?? AuraFaceChatMailService.effectiveDefaultBaseUrl;
-    debugPrint('[Consultation] mail bridge savedUrl=$savedUrl effectiveUrl=$effectiveUrl');
+    final bridgeUrl = AuraFaceChatMailService.consultationSendBaseUrl(savedUrl);
+    debugPrint('[Consultation] mail bridge savedPref=$savedUrl actualBridgeUrl=$bridgeUrl');
 
     var mailSuccess = false;
     bool? mailSentReport;
     SendChatResponse? mailBridgeRes;
     try {
-      final mailService = AuraFaceChatMailService(baseUrl: savedUrl);
+      final mailService = AuraFaceChatMailService(baseUrl: bridgeUrl);
       final chatId = 'consultation_${userId}_${DateTime.now().millisecondsSinceEpoch}';
       final res = await mailService.send(
         userId: userId,
@@ -241,7 +268,7 @@ class _ConsultationPageState extends State<ConsultationPage> {
       if (mounted) {
         final isConfigError = e is StateError && e.message.contains('MAIL_BRIDGE_URL');
         final isLocalhostRefused = e.toString().contains('Connection refused') &&
-            _isLocalhostUrl(effectiveUrl);
+            _isLocalhostUrl(bridgeUrl);
         final message = isConfigError
             ? '開発者通知の接続先が設定されていません。本番ビルドでは要設定です。'
             : isLocalhostRefused
@@ -269,8 +296,10 @@ class _ConsultationPageState extends State<ConsultationPage> {
 
     await _load();
     if (mounted && mailSuccess) {
-      final coinLine =
-          '${urgent ? '至急相談' : '通常相談'}を送信しました（消費: ${urgent ? (gemCost ?? 0) : coinCost} ${urgent ? 'ジェム' : 'コイン'}）';
+      // 画面上の種別は「押したボタン」基準（至急で押したなら常に至急表記。Gmail文言はサーバー応答で SnackBar 追記）
+      final coinLine = urgent
+          ? '至急相談を送信しました（優先券1枚・本日の至急枠を1回使用）'
+          : '通常相談を送信しました（通常相談券1枚）';
       if (useFirestore) {
         if (mailSentReport == true) {
           _showMailSentFeedback(
@@ -320,6 +349,9 @@ class _ConsultationPageState extends State<ConsultationPage> {
 
   @override
   Widget build(BuildContext context) {
+    final canUrgent = _urgentSlotsLeft > 0 &&
+        _priorityTickets >= ConsultationTicketService.priorityCostPerSend;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('占い相談'),
@@ -342,32 +374,36 @@ class _ConsultationPageState extends State<ConsultationPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('ポイント: $_point'),
-            Text('コイン: $_coins / ジェム: $_gems'),
+            Text('通常相談券: $_normalTickets 枚 / 優先券: $_priorityTickets 枚'),
+            Text(
+              '至急枠（本日・日本時間）: 残り $_urgentSlotsLeft / ${ConsultationTicketService.maxUrgentSlotsPerDay}（24時間受付・1日5回まで）',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+            ),
             const SizedBox(height: 6),
             Row(
               children: [
                 TextButton.icon(
                   icon: const Icon(Icons.add_circle_outline, size: 18),
-                  label: const Text('コイン+100'),
+                  label: const Text('通常券+3'),
                   onPressed: () async {
-                    final v = await CurrencyService.addCoins(100);
+                    await ConsultationTicketService.addNormalTickets(3);
                     await _load();
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('コインを付与しました（現在: $v）'), backgroundColor: Colors.green),
+                        const SnackBar(content: Text('通常相談券を3枚付与しました'), backgroundColor: Colors.green),
                       );
                     }
                   },
                 ),
                 TextButton.icon(
-                  icon: const Icon(Icons.diamond_outlined, size: 18),
-                  label: const Text('ジェム+10'),
+                  icon: const Icon(Icons.stars_outlined, size: 18),
+                  label: const Text('優先券+1'),
                   onPressed: () async {
-                    final v = await CurrencyService.addGems(10);
+                    await ConsultationTicketService.addPriorityTickets(1);
                     await _load();
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('ジェムを付与しました（現在: $v）'), backgroundColor: Colors.green),
+                        const SnackBar(content: Text('優先券を1枚付与しました'), backgroundColor: Colors.green),
                       );
                     }
                   },
@@ -395,27 +431,53 @@ class _ConsultationPageState extends State<ConsultationPage> {
             ),
             const SizedBox(height: 16),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
                     icon: const Icon(Icons.chat),
-                    onPressed: (_coins >= 20 || !CloudService.isAvailable)
-                        ? () => _send(urgent: false, coinCost: 20, gemCost: null)
+                    onPressed: _normalTickets >= ConsultationTicketService.normalCostPerSend
+                        ? () => _send(urgent: false)
                         : null,
-                    label: const Text('通常相談(20コイン)'),
+                    label: const Text('通常相談（通常相談券1枚）'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.priority_high),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.amber.shade700,
+                  child: Tooltip(
+                    message: canUrgent
+                        ? '開発者へのメールは「至急占い」件名・専用差出人で届きます（優先券1枚・本日枠1回）'
+                        : (_urgentSlotsLeft <= 0
+                            ? '本日の至急枠（5回）を使い切りました。'
+                            : '優先券が不足しています。'),
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.amber.shade700,
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                      ),
+                      onPressed: canUrgent ? () => _send(urgent: true) : null,
+                      icon: const Icon(Icons.priority_high, size: 22),
+                      label: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            '至急相談',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '本日残り $_urgentSlotsLeft / ${ConsultationTicketService.maxUrgentSlotsPerDay} 枠',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                            textAlign: TextAlign.center,
+                          ),
+                          Text(
+                            '（優先券 $_priorityTickets 枚）',
+                            style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.9)),
+                          ),
+                        ],
+                      ),
                     ),
-                    onPressed: (_gems >= 5 || !CloudService.isAvailable)
-                        ? () => _send(urgent: true, coinCost: 0, gemCost: 5)
-                        : null,
-                    label: const Text('至急相談(5ジェム)'),
                   ),
                 ),
               ],
@@ -430,8 +492,9 @@ class _ConsultationPageState extends State<ConsultationPage> {
                   itemBuilder: (_, i) {
                     final item = _history[i];
                     final text = item['text'] ?? '';
-                    final urgent = item['urgent'] == true;
-                    final cost = item['cost'] ?? 0;
+                    final urgent = _coerceUrgentFlag(item['urgent']);
+                    final rawCost = item['cost'];
+                    final ticketCount = rawCost is int ? rawCost : 1;
                     final status = item['status'] ?? 'pending';
                     final answer = item['answer'] as String?;
                     final answeredAt = item['answeredAt'];
@@ -457,7 +520,9 @@ class _ConsultationPageState extends State<ConsultationPage> {
                     return ExpansionTile(
                       leading: Icon(urgent ? Icons.priority_high : Icons.chat, color: urgent ? Colors.red : null),
                       title: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),
-                      subtitle: Text('${urgent ? "至急" : "通常"} ($cost ${urgent ? "ジェム" : "コイン"}) - $statusText'),
+                      subtitle: Text(
+                        '${urgent ? "至急" : "通常"}（${urgent ? "優先券" : "通常相談券"} $ticketCount枚）- $statusText',
+                      ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [

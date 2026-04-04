@@ -7,9 +7,22 @@ const PRIORITY_GUIDANCE = "priority_guidance";
 
 /** @param {unknown} v */
 function normalizeConsultationType(v) {
-  if (v === PRIORITY_GUIDANCE || v === "priorityGuidance") return PRIORITY_GUIDANCE;
-  // アプリ・旧クライアントの揺れ吸収（至急フラグのみ送られてきた場合）
-  if (v === "urgent" || v === "emergency" || v === true) return PRIORITY_GUIDANCE;
+  if (v === true) return PRIORITY_GUIDANCE;
+  if (v == null || v === "") return NORMAL;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase().replace(/-/g, "_");
+    if (
+      s === PRIORITY_GUIDANCE ||
+      s === "priorityguidance" ||
+      s === "urgent" ||
+      s === "emergency" ||
+      s === "priority"
+    ) {
+      return PRIORITY_GUIDANCE;
+    }
+    if (s === NORMAL) return NORMAL;
+    return NORMAL;
+  }
   return NORMAL;
 }
 
@@ -19,14 +32,17 @@ module.exports = {
   normalizeConsultationType,
   /** メール件名（定数） */
   SUBJECT_NORMAL: "[AuraFace] 新しい相談が届きました",
-  /** Gmail 一覧・通知で「緊急」が文字として見えるように先頭に付与 */
+  /**
+   * 至急（占い相談の優先導き）。通常は [AuraFace] 始まりなので、先頭を【至急占い】にして一覧・通知の一行目を完全に別物にする。
+   */
   SUBJECT_PRIORITY:
-    "【緊急】【優先導き】2時間以内要対応｜AuraFace [PRIORITY_GUIDANCE]",
+    "【至急占い・緊急】2時間以内要対応｜優先導き｜AuraFace [PRIORITY_GUIDANCE]",
   /** 本文・検索用タグ */
   TAG_PRIORITY: "[PRIORITY_GUIDANCE]",
   /**
    * Gmail 受信トレイの「差出人」欄で通常 / 優先を一目で分ける（MAIL_FROM の表示名として使う）
+   * 通常「AuraFace｜…」と逆順にして、同じアドレスでも左列の文字列が大きく変わるようにする。
    */
   FROM_DISPLAY_NORMAL: "AuraFace｜通常相談",
-  FROM_DISPLAY_PRIORITY: "【緊急】優先導き・AuraFace",
+  FROM_DISPLAY_PRIORITY: "至急占い相談｜AuraFace【優先導き】",
 };

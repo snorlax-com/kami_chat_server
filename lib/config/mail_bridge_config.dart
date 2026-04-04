@@ -20,4 +20,6 @@
 // 同じWi-FiのPCのIP（例: http://192.168.1.10:3000）を1回だけ設定すれば、以降は届く。
 
 /// 本番で使うチャットAPIのURL。Render デプロイ先に統一。
+/// 占い相談（リリース）は [AuraFaceChatMailService.consultationSendBaseUrl] により常にここへ送る（
+/// 開発用に保存した古い mail_bridge_base_url で至急が通常メールになるのを防ぐ）。
 const String kMailBridgeProductionUrl = 'https://kami-chat-server.onrender.com';

@@ -26,3 +26,8 @@ services:
         sync: false
       - key: TOKEN_SECRET
         sync: false
+      # 至急を JST で時間帯限定する場合のみ追加（両方セット）。未設定なら 24 時間受付。
+      # - key: CONSULTATION_URGENT_JST_HOUR_START
+      #   value: "10"
+      # - key: CONSULTATION_URGENT_JST_HOUR_END
+      #   value: "23"

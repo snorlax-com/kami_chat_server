@@ -20,7 +20,9 @@ function build(p) {
   const userLine = (p.userName || "").trim() || p.userId || "（未設定）";
   const tag = types.TAG_PRIORITY;
 
-  const text = `【緊急】【優先導き】
+  const text = `【至急占い相談・アプリ至急ボタンからの送信】通常の「[AuraFace] 新しい相談」とは別扱いでご確認ください。
+
+【緊急】【優先導き】
 緊急対応が必要な相談です（2時間以内の目安）。
 至急ご確認をお願いします。
 
@@ -67,7 +69,7 @@ ${tag}
   };
 
   const preheader = gmailPreheader(
-    "【緊急】優先導き・2時間以内要対応。至急ご確認ください。"
+    "【至急占い】優先導き・2時間以内。通常相談メールとは別です。Gmail検索: 至急占い OR list:fortune-urgent.consultations.auraface"
   );
 
   const html = `

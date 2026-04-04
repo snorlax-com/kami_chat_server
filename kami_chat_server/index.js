@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const sendConsultationMail = require("./mail/sendConsultationMail");
 const types = require("./constants/consultationTypes");
+const urgentReception = require("./config/urgentReception");
 const { verifyToken } = require("./token");
 
 const app = express();
@@ -41,8 +42,24 @@ app.post("/api/chat/send", async (req, res) => {
     const text = message != null ? String(message).trim() : "";
     const cid = chatId || "default";
     const consultationType = types.normalizeConsultationType(rawConsultationType);
+    console.log("[chat/send] consultationType", {
+      raw: rawConsultationType,
+      normalized: consultationType,
+    });
     if (!text) {
       return res.status(400).json({ status: "error", message: "message required" });
+    }
+    if (consultationType === types.PRIORITY_GUIDANCE) {
+      const ur = urgentReception.isUrgentAllowedAt();
+      if (!ur.allowed) {
+        return res.status(403).json({
+          status: "error",
+          success: false,
+          message: `至急相談の受付時間外です（日本時間 ${ur.start}:00〜${ur.end}:59）。`,
+          consultationType,
+          urgentReception: ur,
+        });
+      }
     }
     if (!store.has(cid)) store.set(cid, []);
     const createdAt = Date.now();
@@ -121,7 +138,7 @@ app.post("/api/chat/send", async (req, res) => {
       mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
       mailSubject: mailError ? null : mailResult?.subject ?? null,
       mailFromDisplay: mailError ? null : mailResult?.fromDisplay ?? null,
-      mailApiBuild: "v2-consultation-tier",
+      mailApiBuild: "v2-consultation-tier-r4-gmail-distinct",
     });
   } catch (err) {
     console.error("[chat/send] error", err);
@@ -304,4 +321,5 @@ function logMailEnvWarning() {
 app.listen(PORT, () => {
   console.log(`Kami chat server listening on port ${PORT}`);
   logMailEnvWarning();
+  console.log("[config] consultation urgent (priority_guidance):", urgentReception.policySummaryForLog());
 });

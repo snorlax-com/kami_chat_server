@@ -7,13 +7,14 @@
 | 項目 | 通常相談 | 優先導き |
 |------|----------|----------|
 | `consultationType` | `normal` | `priority_guidance` |
-| **差出人（From の表示名）** | `AuraFace｜通常相談` | `【緊急】優先導き・AuraFace` ※アドレスは `MAIL_FROM` と同じ |
-| 件名（例） | `[AuraFace] 新しい相談が届きました` | `【緊急】【優先導き】2時間以内要対応｜AuraFace [PRIORITY_GUIDANCE]` |
+| **差出人（From の表示名）** | `AuraFace｜通常相談` | `至急占い相談｜AuraFace【優先導き】` ※アドレスは `MAIL_FROM` と同じ |
+| 件名（例） | `[AuraFace] 新しい相談が届きました` | `【至急占い・緊急】2時間以内要対応｜優先導き｜AuraFace [PRIORITY_GUIDANCE]` |
+| フィルタ用（任意） | — | 件名に `至急占い` を含む、または `List-Id` 相当の検索: `list:fortune-urgent.consultations.auraface` |
 | 受信一覧の2行目（スニペット） | 「至急ではありません」等（プレヘッダー） | 「2時間以内対応」「至急ご確認」等（プレヘッダー） |
 | メールヘッダー | `Importance: normal`, `X-Priority: 3` | `Importance: high`, `X-Priority: 1` など |
 | 本文の目印 | 「通常相談」 | 冒頭に「【優先導き】」「2時間以内対応」、識別子 `[PRIORITY_GUIDANCE]` |
 
-**Gmail の「重要」マークについて**: Gmail が自動で付ける「重要」は受信者の利用傾向に依存し、送信側のヘッダーだけでは必ず表示されるわけではありません。受信トレイでは **差出人表示名・件名・スニペット** の違いがもっとも確実です。優先導きにはフィルタで「重要マークを付ける」を推奨します（下記）。
+**Gmail の「重要」マークについて**: Gmail が自動で付ける「重要」は受信者の利用傾向に依存し、送信側のヘッダーだけでは必ず表示されるわけではありません。至急は **件名先頭を `【至急占い・緊急】`、差出人を `至急占い相談｜…` とし、通常の `[AuraFace]` 始まり件名と一覧上で完全に別パターン**にしています。確実に分けたい場合はフィルタで「重要マークを付ける」を推奨します（下記）。
 
 ## 1. Gmail でフィルタを作成する
 
@@ -42,9 +43,9 @@
 
 ## 3. 通常相談と優先導きの見分け方
 
-- **差出人**: 一覧左列で `AuraFace｜通常相談` と `【緊急】優先導き・AuraFace` が切り替わります（同一アドレスでも表示名が違います）。
+- **差出人**: 一覧左列で `AuraFace｜通常相談` と `至急占い相談｜AuraFace【優先導き】` が切り替わります（同一アドレスでも表示名が違います）。
 - **通常相談の件名**: `[AuraFace] 新しい相談が届きました`
-- **優先導きの件名**: `【緊急】【優先導き】2時間以内要対応｜AuraFace`（末尾に `[PRIORITY_GUIDANCE]` が付く場合があります）
+- **優先導きの件名**: `【至急占い・緊急】2時間以内要対応｜優先導き｜AuraFace`（末尾に `[PRIORITY_GUIDANCE]` が付く場合があります）
 
 ロック画面の通知でも、件名に「優先導き」「要確認」が入るため優先度が分かりやすくなります。
 
@@ -90,5 +91,6 @@
 
 - 件名・本文の組み立て: `kami_chat_server/mail/buildConsultationNotification.js`
 - 種別定数: `kami_chat_server/constants/consultationTypes.js`
+- 至急の受付方針（デフォルト **24 時間**。任意で JST 時刻帯のみ `kami_chat_server/config/urgentReception.js` ＋環境変数）: `CONSULTATION_URGENT_JST_HOUR_START` / `CONSULTATION_URGENT_JST_HOUR_END`（`kami_chat_server/.env.example` 参照）
 - テンプレート: `kami_chat_server/mail/templates/normalConsultation.js` / `priorityGuidance.js`
 - テスト: `kami_chat_server` で `npm run test:consultation-mail`
