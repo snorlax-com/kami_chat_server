@@ -50,6 +50,8 @@
 2. ログの `[chat/send] consultationType` で `raw` / `normalized` が `priority_guidance` か確認する。`[sendConsultationMail][URGENT]` が出ていれば Resend まで至急テンプレで送っている。
 3. Flutter **リリース**は `kMailBridgeProductionUrl` 固定でこのサービスに送る。実機で以前「接続先を設定」した URL は占い相談では使われない。
 
+4. **至急で始めたのに追記だけ通常メールになる**とき: アプリの「開発者とのやりとり」は、追記の `consultationType` を **GET `/api/chat/thread` の先頭ユーザー発言**に合わせる（共有設定だけに依存しない）。`messages[].consultationType` が JSON に含まれることを Render ログで確認する。
+
 ## ローカル
 
 ```bash

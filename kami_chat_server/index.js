@@ -9,7 +9,7 @@ const { verifyToken } = require("./token");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// メモリ保存: chatId -> [{ id, role, text, createdAt }, ...]
+// メモリ保存: chatId -> [{ id, role, text, createdAt, consultationType? }, ...]
 const store = new Map();
 let nextId = 1;
 
@@ -138,7 +138,7 @@ app.post("/api/chat/send", async (req, res) => {
       mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
       mailSubject: mailError ? null : mailResult?.subject ?? null,
       mailFromDisplay: mailError ? null : mailResult?.fromDisplay ?? null,
-      mailApiBuild: "v2-consultation-tier-r4-gmail-distinct",
+      mailApiBuild: "v2-consultation-tier-r5-thread-consultation-type",
     });
   } catch (err) {
     console.error("[chat/send] error", err);
@@ -159,7 +159,23 @@ app.get("/api/chat/thread", (req, res) => {
       ? list.filter((m) => m.createdAt >= since)
       : [...list];
   messages.sort((a, b) => a.createdAt - b.createdAt);
-  res.json({ status: "ok", chatId, messages });
+  /** アプリが追記時に至急テンプレを維持できるよう、各メッセージの consultationType を明示 */
+  const messagesOut = messages.map((m) => {
+    const base = {
+      id: m.id,
+      role: m.role,
+      text: m.text,
+      createdAt: m.createdAt,
+    };
+    if (m.role === "user" && m.consultationType != null) {
+      return { ...base, consultationType: m.consultationType };
+    }
+    if (m.role === "user") {
+      return { ...base, consultationType: types.NORMAL };
+    }
+    return base;
+  });
+  res.json({ status: "ok", chatId, messages: messagesOut });
 });
 
 // テスト用: 開発者返信を追加

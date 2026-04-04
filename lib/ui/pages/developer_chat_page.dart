@@ -19,7 +19,8 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
   List<BridgeChatMessage> _messages = [];
   String? _chatId;
   String _userId = '';
-  String? _savedBaseUrl;
+  /// メールブリッジの実効 URL（リリースでは本番固定。consultation_page と同じ）
+  String? _bridgeBaseUrl;
   bool _loading = true;
   String? _error;
   Timer? _poll;
@@ -31,8 +32,33 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
 
   bool get _requiresCoinForNextSend => _userMessageCount >= 1;
 
+  /// 先頭のユーザー発言の種別（サーバー保存値）。無い場合は至急ではない。
+  bool _threadOpensWithPriority(List<BridgeChatMessage> list) {
+    for (final m in list) {
+      if (m.role != 'user') continue;
+      return m.consultationType?.trim() == ConsultationMailType.priorityGuidance;
+    }
+    return false;
+  }
+
+  /// 追記メールの consultationType: **スレッド上の先頭 user を最優先**（プリファだけだと未設定で常に通常になるのが繰り返しの原因）
+  Future<String> _followUpConsultationTypeFor(List<BridgeChatMessage> list) async {
+    for (final m in list) {
+      if (m.role != 'user') continue;
+      final c = m.consultationType?.trim();
+      if (c == ConsultationMailType.priorityGuidance) {
+        return ConsultationMailType.priorityGuidance;
+      }
+      if (c == ConsultationMailType.normal) {
+        return ConsultationMailType.normal;
+      }
+      break;
+    }
+    return await DeveloperChatPref.getActiveConsultationType() ?? ConsultationMailType.normal;
+  }
+
   AuraFaceChatMailService get _service =>
-      AuraFaceChatMailService(baseUrl: _savedBaseUrl);
+      AuraFaceChatMailService(baseUrl: _bridgeBaseUrl);
 
   @override
   void initState() {
@@ -51,7 +77,8 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
     final prefs = await SharedPreferences.getInstance();
     _userId = prefs.getString('user_id') ?? 'user_${DateTime.now().millisecondsSinceEpoch}';
     if (!prefs.containsKey('user_id')) await prefs.setString('user_id', _userId);
-    _savedBaseUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
+    final saved = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
+    _bridgeBaseUrl = AuraFaceChatMailService.consultationSendBaseUrl(saved);
     _chatId = await DeveloperChatPref.getActiveChatId();
     if (!mounted) return;
     if (_chatId == null || _chatId!.isEmpty) {
@@ -102,6 +129,10 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
     if (markRead) {
       final maxDev = _maxDevCreatedAt(sorted);
       if (maxDev > 0) await DeveloperChatPref.setLastSeenDevCreatedAt(maxDev);
+    }
+    if (_chatId != null && _chatId!.isNotEmpty) {
+      final syncType = await _followUpConsultationTypeFor(sorted);
+      await DeveloperChatPref.setActiveChatId(_chatId!, consultationType: syncType);
     }
     final wallet = await CurrencyService.load();
     if (!mounted) return;
@@ -159,13 +190,14 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
         if (mounted) setState(() => _coins = w['coins'] ?? 0);
       }
 
+      final mailConsultationType = await _followUpConsultationTypeFor(_messages);
       final res = await _service.send(
         userId: _userId,
         chatId: _chatId!,
         message: text,
         userName: '占い相談ユーザー',
         userEmail: '',
-        consultationType: ConsultationMailType.normal,
+        consultationType: mailConsultationType,
       );
       if (!mounted) return;
       if (!res.success) {
@@ -260,6 +292,30 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
                           child: const Text('再試行'),
                         ),
                       ],
+                    ),
+                  ),
+                if (!_loading &&
+                    _messages.isNotEmpty &&
+                    _threadOpensWithPriority(_messages))
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade900.withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber.shade700),
+                      ),
+                      child: Text(
+                        'このスレッドは占い相談の「至急」で始まっています。'
+                        '追記メールも【至急占い】件名で届きます（サーバーに保存された種別に従います）。',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.amber.shade100,
+                        ),
+                      ),
                     ),
                   ),
                 Expanded(

@@ -241,11 +241,13 @@ class AuraFaceChatMailService {
                       ? raw.toInt()
                       : 0;
               final mid = m['id'];
+              final ct = m['consultationType'];
               return BridgeChatMessage(
                 id: mid is int ? mid : (mid is num ? mid.toInt() : 0),
                 role: m['role'] as String? ?? 'user',
                 text: m['text'] as String? ?? '',
                 createdAt: ts,
+                consultationType: ct is String ? ct : ct?.toString(),
               );
             })
             .toList();
@@ -276,11 +278,15 @@ class BridgeChatMessage {
   final String text;
   final int createdAt;
 
+  /// サーバーが付与（`user` のみ）。追記メールの consultationType は先頭 user の値に合わせる。
+  final String? consultationType;
+
   BridgeChatMessage({
     required this.id,
     required this.role,
     required this.text,
     required this.createdAt,
+    this.consultationType,
   });
 
   bool get isFromDev => role == 'dev';
