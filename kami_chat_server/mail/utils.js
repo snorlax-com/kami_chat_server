@@ -30,4 +30,10 @@ function messagePreview(message, maxLen = 200) {
   return s.slice(0, maxLen) + "…";
 }
 
-module.exports = { escapeHtml, formatReceivedAtJst, messagePreview };
+/** Gmail 一覧の2行目（スニペット）用。本文先頭と混ざらないようゼロ幅スペースで埋める */
+function gmailPreheader(visibleText, padZwsp = 120) {
+  const pad = "\u200c".repeat(padZwsp);
+  return `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#fff;opacity:0;">${escapeHtml(visibleText)}${pad}</div>`;
+}
+
+module.exports = { escapeHtml, formatReceivedAtJst, messagePreview, gmailPreheader };

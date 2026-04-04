@@ -25,12 +25,13 @@ test("通常相談: 件名が通常用である", () => {
   assert.ok(!subject.includes("優先導き"));
 });
 
-test("優先導き: 件名が優先用である", () => {
+test("優先導き: 件名が優先用である（緊急の文字を含む）", () => {
   const { subject } = buildConsultationNotification({
     ...baseInput,
     consultationType: "priority_guidance",
   });
   assert.equal(subject, types.SUBJECT_PRIORITY);
+  assert.ok(subject.includes("緊急"));
   assert.ok(subject.includes("優先導き"));
   assert.ok(subject.includes("[PRIORITY_GUIDANCE]"));
 });
@@ -51,7 +52,43 @@ test("通常相談本文に優先導きの見出しが混ざらない", () => {
   });
   assert.ok(!text.includes("【優先導き】"));
   assert.ok(!html.includes("【優先導き】"));
+  assert.ok(!html.includes("【緊急】"));
   assert.ok(text.includes("通常相談"));
+});
+
+test("通常: HTML にプレヘッダー（一覧スニペット用・至急ではない旨）", () => {
+  const { html } = buildConsultationNotification({
+    ...baseInput,
+    consultationType: "normal",
+  });
+  assert.ok(html.includes("至急ではありません"));
+});
+
+test("優先: HTML にプレヘッダー（一覧スニペット用・2時間以内）", () => {
+  const { html } = buildConsultationNotification({
+    ...baseInput,
+    consultationType: "priority_guidance",
+  });
+  assert.ok(html.includes("2時間以内"));
+  assert.ok(html.includes("緊急"));
+  assert.ok(html.includes("至急ご確認"));
+});
+
+test("優先: テキスト本文に「緊急」が複数箇所で明示される", () => {
+  const { text, html } = buildConsultationNotification({
+    ...baseInput,
+    consultationType: "priority_guidance",
+  });
+  assert.ok((text.match(/緊急/g) || []).length >= 2);
+  assert.ok(html.includes("緊急対応"));
+});
+
+test("consultationType urgent も優先導き扱い", () => {
+  const { subject } = buildConsultationNotification({
+    ...baseInput,
+    consultationType: "urgent",
+  });
+  assert.equal(subject, types.SUBJECT_PRIORITY);
 });
 
 test("両方に返信URLが含まれる", () => {

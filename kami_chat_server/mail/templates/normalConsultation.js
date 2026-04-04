@@ -1,7 +1,7 @@
 "use strict";
 
 const types = require("../../constants/consultationTypes");
-const { escapeHtml, formatReceivedAtJst, messagePreview } = require("../utils");
+const { escapeHtml, formatReceivedAtJst, messagePreview, gmailPreheader } = require("../utils");
 
 /**
  * @param {{
@@ -57,8 +57,13 @@ ${p.adminReplyUrl}
     messageId: escapeHtml(String(p.messageId)),
   };
 
+  const preheader = gmailPreheader(
+    "【通常相談】至急ではありません。時間のあるときにご確認ください。"
+  );
+
   const html = `
     <div style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;">
+      ${preheader}
       <p>AuraFaceで新しい<strong>通常相談</strong>が届きました。</p>
       <table style="border-collapse:collapse;margin:12px 0;max-width:560px;">
         <tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;white-space:nowrap;">■ 種別</td><td style="padding:6px 0;">通常相談</td></tr>

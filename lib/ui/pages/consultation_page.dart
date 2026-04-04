@@ -10,6 +10,74 @@ import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
 import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
 
+/// サーバー応答と至急ボタンの一致をユーザーに示す（Render 未更新時の切り分け用）
+void _showMailSentFeedback(
+  BuildContext context, {
+  required bool useFirestore,
+  required String coinLine,
+  required bool urgent,
+  required bool mailSent,
+  SendChatResponse? bridge,
+}) {
+  if (!mailSent) return;
+
+  final v2 = bridge?.mailApiBuild == 'v2-consultation-tier';
+  final serverUrgent = bridge?.mailUrgent == true;
+  final serverNormal = bridge?.mailUrgent == false;
+
+  if (urgent && v2 && serverNormal) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$coinLine。\n'
+          '【要確認】サーバーは「通常メール」として送信しました。至急なのに Gmail で区別が付かない原因はこれです。\n'
+          'Render の kami_chat_server をこのリポジトリの最新版で再デプロイし、consultationType が届くか確認してください。',
+        ),
+        backgroundColor: Colors.deepOrange,
+        duration: const Duration(seconds: 14),
+      ),
+    );
+    return;
+  }
+
+  if (urgent && mailSent && !v2) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$coinLine。メールは送信されました。\n'
+          'サーバーが古い応答形式のため、Gmail に【緊急】が付いているか自動では確認できません。'
+          '件名に「【緊急】」が無い場合は kami-chat-server（Render）を最新コードで再デプロイしてください。',
+        ),
+        backgroundColor: Colors.amber.shade800,
+        duration: const Duration(seconds: 12),
+      ),
+    );
+    return;
+  }
+
+  final extraUrgent = urgent && serverUrgent
+      ? ' Gmailでは件名が「【緊急】」で始まり、差出人に「【緊急】」が含まれます。'
+      : '';
+
+  if (useFirestore) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$coinLine。開発者に通知しました。$extraUrgent'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: urgent ? 8 : 4),
+      ),
+    );
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('相談内容を開発者にメールで送りました。$extraUrgent'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: urgent ? 8 : 4),
+      ),
+    );
+  }
+}
+
 class ConsultationPage extends StatefulWidget {
   const ConsultationPage({super.key});
 
@@ -105,6 +173,7 @@ class _ConsultationPageState extends State<ConsultationPage> {
 
     var mailSuccess = false;
     bool? mailSentReport;
+    SendChatResponse? mailBridgeRes;
     try {
       final mailService = AuraFaceChatMailService(baseUrl: savedUrl);
       final chatId = 'consultation_${userId}_${DateTime.now().millisecondsSinceEpoch}';
@@ -117,8 +186,10 @@ class _ConsultationPageState extends State<ConsultationPage> {
         consultationType:
             urgent ? ConsultationMailType.priorityGuidance : ConsultationMailType.normal,
       );
+      mailBridgeRes = res;
       debugPrint(
-        '[Consultation] mail send success=${res.success} mailSent=${res.mailSent} error=${res.error} mailError=${res.mailError}',
+        '[Consultation] mail send success=${res.success} mailSent=${res.mailSent} mailUrgent=${res.mailUrgent} '
+        'consultationType=${res.consultationType} subject=${res.mailSubject} build=${res.mailApiBuild} error=${res.error} mailError=${res.mailError}',
       );
       mailSuccess = res.success;
       mailSentReport = res.mailSent;
@@ -202,11 +273,13 @@ class _ConsultationPageState extends State<ConsultationPage> {
           '${urgent ? '至急相談' : '通常相談'}を送信しました（消費: ${urgent ? (gemCost ?? 0) : coinCost} ${urgent ? 'ジェム' : 'コイン'}）';
       if (useFirestore) {
         if (mailSentReport == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('$coinLine。開発者に通知しました。'),
-              backgroundColor: Colors.green,
-            ),
+          _showMailSentFeedback(
+            context,
+            useFirestore: true,
+            coinLine: coinLine,
+            urgent: urgent,
+            mailSent: true,
+            bridge: mailBridgeRes,
           );
         } else if (mailSentReport == null) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -221,11 +294,13 @@ class _ConsultationPageState extends State<ConsultationPage> {
           );
         }
       } else if (mailSentReport == true) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('相談内容を開発者にメールで送りました。'),
-            backgroundColor: Colors.green,
-          ),
+        _showMailSentFeedback(
+          context,
+          useFirestore: false,
+          coinLine: coinLine,
+          urgent: urgent,
+          mailSent: true,
+          bridge: mailBridgeRes,
         );
       } else if (mailSentReport == null) {
         ScaffoldMessenger.of(context).showSnackBar(

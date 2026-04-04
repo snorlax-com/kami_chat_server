@@ -59,8 +59,20 @@ app.post("/api/chat/send", async (req, res) => {
       chatId: cid,
       messageId: id,
       consultationType,
+      /** Render / ターミナルで grep しやすい */
+      mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
       text: text.slice(0, 80),
     });
+    if (consultationType === types.PRIORITY_GUIDANCE) {
+      console.log(
+        "[MAIL_URGENT] priority_guidance 至急相談 — chatId=%s messageId=%s userId=%s",
+        cid,
+        id,
+        userId || ""
+      );
+    } else {
+      console.log("[MAIL_NORMAL] normal consultation — chatId=%s messageId=%s", cid, id);
+    }
 
     let mailResult = null;
     let mailError = null;
@@ -75,6 +87,8 @@ app.post("/api/chat/send", async (req, res) => {
           kind: "mail_notification",
           consultationType,
           priority: consultationType === types.PRIORITY_GUIDANCE,
+          urgent: consultationType === types.PRIORITY_GUIDANCE,
+          mailKind: consultationType === types.PRIORITY_GUIDANCE ? "URGENT" : "NORMAL",
           chatId: cid,
           messageId: id,
           mailId: mailResult?.id ?? null,
@@ -83,6 +97,7 @@ app.post("/api/chat/send", async (req, res) => {
       console.log("[chat/send] mail_sent resend_ok", {
         messageId: id,
         consultationType,
+        urgent: consultationType === types.PRIORITY_GUIDANCE,
         to: process.env.ADMIN_EMAIL,
         mailId: mailResult?.id,
       });
@@ -92,6 +107,7 @@ app.post("/api/chat/send", async (req, res) => {
     }
 
     // メールまで成功した場合は status: "ok"（E2E 期待値と一致）
+    // アプリ側で「至急が通常扱いになっていないか」確認できるよう、正規化後の種別と実際の件名を返す
     return res.json({
       status: mailError ? "saved_but_mail_failed" : "ok",
       success: true,
@@ -101,6 +117,11 @@ app.post("/api/chat/send", async (req, res) => {
       mailSent: !mailError,
       mailId: mailResult?.id ?? null,
       error: mailError ? mailError.message : null,
+      consultationType,
+      mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
+      mailSubject: mailError ? null : mailResult?.subject ?? null,
+      mailFromDisplay: mailError ? null : mailResult?.fromDisplay ?? null,
+      mailApiBuild: "v2-consultation-tier",
     });
   } catch (err) {
     console.error("[chat/send] error", err);

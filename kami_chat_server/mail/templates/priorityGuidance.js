@@ -1,7 +1,7 @@
 "use strict";
 
 const types = require("../../constants/consultationTypes");
-const { escapeHtml, formatReceivedAtJst, messagePreview } = require("../utils");
+const { escapeHtml, formatReceivedAtJst, messagePreview, gmailPreheader } = require("../utils");
 
 /**
  * @param {{
@@ -20,12 +20,12 @@ function build(p) {
   const userLine = (p.userName || "").trim() || p.userId || "（未設定）";
   const tag = types.TAG_PRIORITY;
 
-  const text = `【優先導き】
-2時間以内対応の対象相談が届きました。
-優先して確認してください。
+  const text = `【緊急】【優先導き】
+緊急対応が必要な相談です（2時間以内の目安）。
+至急ご確認をお願いします。
 
 ■ 種別
-優先導き
+優先導き（緊急）
 
 ■ consultationType
 ${types.PRIORITY_GUIDANCE}
@@ -66,14 +66,20 @@ ${tag}
     messageId: escapeHtml(String(p.messageId)),
   };
 
+  const preheader = gmailPreheader(
+    "【緊急】優先導き・2時間以内要対応。至急ご確認ください。"
+  );
+
   const html = `
     <div style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;">
+      ${preheader}
       <div style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #f59e0b;border-radius:12px;padding:16px 18px;margin-bottom:18px;">
-        <p style="margin:0 0 8px;font-size:18px;font-weight:700;color:#92400e;">【優先導き】</p>
-        <p style="margin:0;font-size:16px;font-weight:600;color:#b45309;">2時間以内対応の対象相談です。優先して確認してください。</p>
+        <p style="margin:0 0 6px;font-size:20px;font-weight:800;color:#991b1b;letter-spacing:0.02em;">【緊急】</p>
+        <p style="margin:0 0 8px;font-size:18px;font-weight:700;color:#92400e;">【優先導き】2時間以内要対応</p>
+        <p style="margin:0;font-size:16px;font-weight:600;color:#b45309;">緊急対応が必要な相談です。至急ご確認をお願いします。</p>
       </div>
       <table style="border-collapse:collapse;margin:12px 0;max-width:560px;">
-        <tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;white-space:nowrap;">■ 種別</td><td style="padding:6px 0;"><strong>優先導き</strong></td></tr>
+        <tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;white-space:nowrap;">■ 種別</td><td style="padding:6px 0;"><strong>優先導き（緊急）</strong></td></tr>
         <tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;">■ consultationType</td><td style="padding:6px 0;"><code>${types.PRIORITY_GUIDANCE}</code></td></tr>
         <tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;">■ 対応目安</td><td style="padding:6px 0;"><strong>2時間以内</strong>（受付: ${safe.receivedAtJst} JST）</td></tr>
         <tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;">■ ユーザー</td><td style="padding:6px 0;">${safe.userLine}<br/><span style="font-size:12px;color:#666;">userId: ${safe.userId || "—"}</span></td></tr>

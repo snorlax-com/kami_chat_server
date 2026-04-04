@@ -5,6 +5,7 @@ const { generateToken } = require("../token");
 const { buildConsultationNotification } = require("./buildConsultationNotification");
 const { buildAdminReplyUrl } = require("./buildAdminReplyUrl");
 const types = require("../constants/consultationTypes");
+const { withDisplayName } = require("./mailFrom");
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const MAIL_FROM = (process.env.MAIL_FROM || "").trim();
@@ -65,12 +66,37 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
     adminReplyUrl,
   });
 
+  const isPriority = consultationType === types.PRIORITY_GUIDANCE;
+  const fromDisplay = isPriority ? types.FROM_DISPLAY_PRIORITY : types.FROM_DISPLAY_NORMAL;
+  const from = withDisplayName(MAIL_FROM, fromDisplay);
+
+  if (isPriority) {
+    console.log("[sendConsultationMail][URGENT]", { subject, fromDisplay, consultationType });
+  } else {
+    console.log("[sendConsultationMail][NORMAL]", { subject, fromDisplay, consultationType });
+  }
+
+  /** Gmail は独自の「重要」判定だが、一覧・一部クライアントで差が付きやすいヘッダー */
+  const headers = isPriority
+    ? {
+        Importance: "high",
+        "X-Priority": "1",
+        "X-MSMail-Priority": "High",
+      }
+    : {
+        Importance: "normal",
+        "X-Priority": "3",
+        "X-MSMail-Priority": "Normal",
+      };
+
   const result = await getResend().emails.send({
-    from: MAIL_FROM,
+    from,
     to: [ADMIN_EMAIL],
     subject,
     html,
     text,
+    headers,
+    tags: [{ name: "consultation_type", value: isPriority ? "priority_guidance" : "normal" }],
   });
 
   if (result.error) {
@@ -79,7 +105,13 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
     );
   }
 
-  return result.data;
+  return {
+    ...(result.data && typeof result.data === "object" ? result.data : {}),
+    subject,
+    fromDisplay,
+    consultationType,
+    mailUrgent: isPriority,
+  };
 }
 
 module.exports = sendConsultationMail;

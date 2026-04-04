@@ -15,12 +15,12 @@
 
 ### 相談種別（consultationType）
 
-| 値 | 意味 | メール件名の傾向 |
-|----|------|------------------|
-| `normal`（省略時もこれ） | 通常相談 | `[AuraFace] 新しい相談が届きました` |
-| `priority_guidance` | 優先導き（至急） | `【要確認】【優先導き】2時間以内対応｜AuraFace …` |
+| 値 | 意味 | 差出人表示名（例） | メール件名の傾向 |
+|----|------|-------------------|------------------|
+| `normal`（省略時もこれ） | 通常相談 | `AuraFace｜通常相談` | `[AuraFace] 新しい相談が届きました` |
+| `priority_guidance` | 優先導き（至急） | `【緊急】優先導き・AuraFace` | `【緊急】【優先導き】2時間以内要対応｜AuraFace …` |
 
-- 件名・HTML/テキスト本文は **`mail/buildConsultationNotification.js`** が種別で切り替えます。
+- 件名・HTML/テキスト本文は **`mail/buildConsultationNotification.js`** が種別で切り替えます。送信時の **From 表示名・メールヘッダー** は **`mail/sendConsultationMail.js`** で切り替えます。
 - テンプレート: `mail/templates/normalConsultation.js`, `mail/templates/priorityGuidance.js`
 - Gmail でのフィルタ・通知の設定手順: リポジトリ **`docs/gmail_notification_setup.md`**
 

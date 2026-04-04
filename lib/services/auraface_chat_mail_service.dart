@@ -139,12 +139,27 @@ class AuraFaceChatMailService {
                 : null;
         final mailErr = body['error']?.toString();
         _log('[MailBridge] send mailSent=$mailSent error=$mailErr');
+        final mu = body['mailUrgent'];
+        final bool? mailUrgent = mu is bool
+            ? mu
+            : mu is String
+                ? (mu.toLowerCase() == 'true'
+                    ? true
+                    : mu.toLowerCase() == 'false'
+                        ? false
+                        : null)
+                : null;
         return SendChatResponse(
           success: true,
           chatId: body['chatId'] as String? ?? chatId,
           messageId: messageId,
           mailSent: mailSent,
           mailError: (mailSent == false && mailErr != null && mailErr.isNotEmpty) ? mailErr : null,
+          consultationType: body['consultationType'] as String?,
+          mailUrgent: mailUrgent,
+          mailSubject: body['mailSubject'] as String?,
+          mailFromDisplay: body['mailFromDisplay'] as String?,
+          mailApiBuild: body['mailApiBuild'] as String?,
         );
       }
       final err = body?['message']?.toString() ?? body?['error']?.toString() ?? 'HTTP ${res.statusCode}';
@@ -264,6 +279,21 @@ class SendChatResponse {
   /// mailSent==false のときサーバーから返るメール失敗理由（例: Resend 未設定）。
   final String? mailError;
 
+  /// サーバーが正規化した種別（`normal` / `priority_guidance`）。新しい kami_chat_server のみ返却。
+  final String? consultationType;
+
+  /// サーバーがメールを「至急」テンプレで送ったか。未対応サーバーでは null。
+  final bool? mailUrgent;
+
+  /// 実際に Resend に渡した件名（デバッグ・Gmail 照合用）。
+  final String? mailSubject;
+
+  /// メールの差出人表示名（MAIL_FROM の表示名差し替え後）。
+  final String? mailFromDisplay;
+
+  /// サーバー実装世代。`v2-consultation-tier` なら種別・件名エコー対応。
+  final String? mailApiBuild;
+
   SendChatResponse({
     required this.success,
     this.chatId,
@@ -271,6 +301,11 @@ class SendChatResponse {
     this.error,
     this.mailSent,
     this.mailError,
+    this.consultationType,
+    this.mailUrgent,
+    this.mailSubject,
+    this.mailFromDisplay,
+    this.mailApiBuild,
   });
 }
 
