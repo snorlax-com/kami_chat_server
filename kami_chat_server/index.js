@@ -38,12 +38,14 @@ app.get("/health", (req, res) => {
 // --- POST /api/chat/send（保存 + Resend で開発者Gmail。メール失敗時も 200 + mailSent:false）
 app.post("/api/chat/send", async (req, res) => {
   try {
-    const { userId, chatId, message, userName, consultationType: rawConsultationType } = req.body || {};
+    const body = req.body || {};
+    const { userId, chatId, message, userName } = body;
     const text = message != null ? String(message).trim() : "";
     const cid = chatId || "default";
-    const consultationType = types.normalizeConsultationType(rawConsultationType);
+    const consultationType = types.resolveConsultationTypeFromSendBody(body);
     console.log("[chat/send] consultationType", {
-      raw: rawConsultationType,
+      raw: body.consultationType ?? body.consultation_type,
+      urgent: body.urgent,
       normalized: consultationType,
     });
     if (!text) {

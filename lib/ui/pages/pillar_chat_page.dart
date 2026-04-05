@@ -137,7 +137,8 @@ class _PillarChatPageState extends State<PillarChatPage> {
         await prefs.setString('user_id', userId);
       }
       final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
-      final mailService = AuraFaceChatMailService(baseUrl: savedUrl);
+      final bridgeUrl = AuraFaceChatMailService.consultationSendBaseUrl(savedUrl);
+      final mailService = AuraFaceChatMailService(baseUrl: bridgeUrl);
       final chatId = 'pillar_tutorial_${userId}_t${widget.personalityType}';
       final pillar = _pillarTitle?.trim().isNotEmpty == true ? _pillarTitle!.trim() : '柱チャット';
       final payload = '[チュートリアル｜$pillar]\n\n$text';

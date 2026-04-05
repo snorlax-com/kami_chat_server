@@ -49,12 +49,19 @@ class AuraFaceChatMailService {
   /// 占い相談の Gmail 通知先。
   /// リリースでは [productionBaseUrl]（`kMailBridgeProductionUrl` 等）を常に使い、
   /// 開発用に保存した古いブリッジ URL へ送って「至急が通常メール」になるのを防ぐ。
+  ///
+  /// **プロファイルビルド**（`flutter run --profile` 等）では [kDebugMode] が false のため、
+  /// 本番 URL があれば保存済み `mail_bridge_base_url`（検証用の古いサーバー）より本番を優先する。
   static String consultationSendBaseUrl(String? savedPrefUrl) {
+    final prod = productionBaseUrl;
+    final prodNorm =
+        (prod != null && prod.trim().isNotEmpty) ? _normalizeBaseUrl(prod.trim()) : null;
+
+    if (prodNorm != null && !kDebugMode) {
+      return prodNorm;
+    }
     if (kReleaseMode) {
-      final p = productionBaseUrl;
-      if (p != null && p.trim().isNotEmpty) {
-        return _normalizeBaseUrl(p.trim());
-      }
+      if (prodNorm != null) return prodNorm;
       return effectiveDefaultBaseUrl;
     }
     final s = savedPrefUrl?.trim() ?? '';
@@ -118,13 +125,16 @@ class AuraFaceChatMailService {
     String? consultationType,
   }) async {
     final uri = Uri.parse('$baseUrl/api/chat/send');
+    final ct = consultationType ?? ConsultationMailType.normal;
     final bodyMap = {
       'userId': userId,
       'chatId': chatId,
       'userEmail': userEmail ?? '',
       'userName': userName ?? 'ユーザー',
       'message': message,
-      'consultationType': consultationType ?? ConsultationMailType.normal,
+      'consultationType': ct,
+      // プロキシ・古いゲートウェイで consultationType だけ欠落する場合の冗長（サーバー側で解決）
+      'urgent': ct == ConsultationMailType.priorityGuidance,
     };
     final bodyStr = jsonEncode(bodyMap);
     try {

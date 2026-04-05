@@ -6,6 +6,34 @@ const NORMAL = "normal";
 const PRIORITY_GUIDANCE = "priority_guidance";
 
 /** @param {unknown} v */
+function coerceUrgentFromBody(v) {
+  if (v === true) return true;
+  if (v === 1) return true;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (s === "true" || s === "1" || s === "yes") return true;
+  }
+  return false;
+}
+
+/**
+ * POST /api/chat/send の body から種別を決定。
+ * - consultationType / consultation_type（別名）を正規化
+ * - 種別フィールドが無い・空のときだけ body.urgent が真なら優先導き（中間層で consultationType だけ落ちる場合の冗長）
+ * - 明示的に "normal" を送った場合は urgent があっても通常のまま
+ */
+function resolveConsultationTypeFromSendBody(body) {
+  const b = body && typeof body === "object" ? body : {};
+  const raw = b.consultationType ?? b.consultation_type;
+  const rawMissing = raw == null || (typeof raw === "string" && raw.trim() === "");
+  let t = normalizeConsultationType(raw);
+  if (rawMissing && t === NORMAL && coerceUrgentFromBody(b.urgent)) {
+    return PRIORITY_GUIDANCE;
+  }
+  return t;
+}
+
+/** @param {unknown} v */
 function normalizeConsultationType(v) {
   if (v === true) return PRIORITY_GUIDANCE;
   if (v == null || v === "") return NORMAL;
@@ -30,6 +58,7 @@ module.exports = {
   NORMAL,
   PRIORITY_GUIDANCE,
   normalizeConsultationType,
+  resolveConsultationTypeFromSendBody,
   /** メール件名（定数） */
   SUBJECT_NORMAL: "[AuraFace] 新しい相談が届きました",
   /**
