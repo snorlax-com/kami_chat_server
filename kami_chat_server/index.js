@@ -40,18 +40,23 @@ app.post("/api/chat/send", async (req, res) => {
   try {
     const body = req.body || {};
     const { userId, chatId, message, userName } = body;
-    const text = message != null ? String(message).trim() : "";
+    const { cleanText, embeddedTierRaw } = types.extractEmbeddedConsultationTier(
+      message != null ? String(message) : ""
+    );
+    const text = cleanText.trim();
     const cid = chatId || "default";
     const headerCt = String(
       req.get("x-auraface-consultation-type") || req.get("X-AuraFace-Consultation-Type") || ""
     ).trim();
     const consultationType = types.resolveConsultationTypeFromSendBody(
       body,
-      headerCt.length > 0 ? headerCt : null
+      headerCt.length > 0 ? headerCt : null,
+      embeddedTierRaw
     );
     console.log("[chat/send] consultationType", {
       raw: body.consultationType ?? body.consultation_type,
       header: headerCt || null,
+      embeddedTier: embeddedTierRaw,
       urgent: body.urgent,
       consultationPriority: body.consultationPriority ?? body.consultation_priority,
       normalized: consultationType,
@@ -148,7 +153,7 @@ app.post("/api/chat/send", async (req, res) => {
       mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
       mailSubject: mailError ? null : mailResult?.subject ?? null,
       mailFromDisplay: mailError ? null : mailResult?.fromDisplay ?? null,
-      mailApiBuild: "v2-consultation-tier-r6-header-consultation-priority",
+      mailApiBuild: "v2-consultation-tier-r7-embedded-message-tier",
     });
   } catch (err) {
     console.error("[chat/send] error", err);

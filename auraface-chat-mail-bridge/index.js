@@ -168,6 +168,15 @@ const SUBJECT_PRIORITY =
 const FROM_DISPLAY_PRIORITY = "至急占い相談｜AuraFace【優先導き】";
 const FROM_DISPLAY_NORMAL = "AuraFace｜通常相談";
 
+const EMBEDDED_TIER_RE = /\r?\n\r?\n__AURAFACE_SEND_TIER__:(priority_guidance|normal)__\s*$/;
+
+function extractEmbeddedConsultationTier(raw) {
+  const s = raw != null ? String(raw) : "";
+  const m = s.match(EMBEDDED_TIER_RE);
+  if (!m) return { cleanText: s, embeddedTierRaw: null };
+  return { cleanText: s.replace(EMBEDDED_TIER_RE, "").trimEnd(), embeddedTierRaw: m[1] };
+}
+
 function withDisplayName(mailFrom, displayName) {
   const s = String(mailFrom).trim();
   const open = s.lastIndexOf("<");
@@ -183,7 +192,7 @@ function withDisplayName(mailFrom, displayName) {
 }
 
 /** @returns {"priority_guidance"|"normal"} */
-function resolveConsultationType(parsed, headerCtRaw) {
+function resolveConsultationType(parsed, headerCtRaw, embeddedTierRaw) {
   const fromBody = parsed.consultationType ?? parsed.consultation_type;
   if (fromBody != null && String(fromBody).trim() !== "") {
     const s = String(fromBody).trim().toLowerCase().replace(/-/g, "_");
@@ -197,6 +206,11 @@ function resolveConsultationType(parsed, headerCtRaw) {
       return "priority_guidance";
     }
     return "normal";
+  }
+  if (embeddedTierRaw != null && String(embeddedTierRaw).trim() !== "") {
+    const e = String(embeddedTierRaw).trim().toLowerCase();
+    if (e === "priority_guidance") return "priority_guidance";
+    if (e === "normal") return "normal";
   }
   const h = headerCtRaw != null ? String(headerCtRaw).trim() : "";
   if (h) {
@@ -225,11 +239,13 @@ function resolveConsultationType(parsed, headerCtRaw) {
 app.post("/api/chat/send", async (req, res) => {
   try {
     const body = SendSchema.parse(req.body);
+    const { cleanText: messageClean, embeddedTierRaw } = extractEmbeddedConsultationTier(body.message);
     const headerCt = String(
       req.get("x-auraface-consultation-type") || req.get("X-AuraFace-Consultation-Type") || ""
     ).trim();
-    const consultationType = resolveConsultationType(body, headerCt || null);
+    const consultationType = resolveConsultationType(body, headerCt || null, embeddedTierRaw);
     const isPriority = consultationType === "priority_guidance";
+    const messageForStore = messageClean.trim() === "" ? "(本文なし)" : messageClean;
 
     console.log(JSON.stringify({
       event: "chat_send_request",
@@ -237,6 +253,7 @@ app.post("/api/chat/send", async (req, res) => {
       userId: body.userId,
       hasUserEmail: Boolean(body.userEmail),
       consultationType,
+      embeddedTier: embeddedTierRaw,
       headerConsultationType: headerCt || null,
       at: new Date().toISOString(),
     }));
@@ -251,7 +268,7 @@ app.post("/api/chat/send", async (req, res) => {
     const msg = await insertMessage({
       chatId: body.chatId,
       role: "user",
-      text: body.message,
+      text: messageForStore,
     });
 
     const exp = Date.now() + 7 * 24 * 60 * 60 * 1000;
@@ -275,7 +292,7 @@ app.post("/api/chat/send", async (req, res) => {
         <p><b>userId:</b> ${escapeHtml(body.userId)}</p>
         <p><b>chatId:</b> ${escapeHtml(body.chatId)}</p>
         <p><b>本文:</b></p>
-        <div style="white-space:pre-wrap;padding:12px;border:1px solid #ddd;border-radius:10px;">${escapeHtml(body.message)}</div>
+        <div style="white-space:pre-wrap;padding:12px;border:1px solid #ddd;border-radius:10px;">${escapeHtml(messageForStore)}</div>
         <p style="margin-top:18px;">
           <a href="${replyUrl}" style="display:inline-block;padding:10px 14px;background:#111;color:#fff;border-radius:10px;text-decoration:none;">
             返信ページを開く
@@ -371,7 +388,7 @@ app.post("/api/chat/send", async (req, res) => {
       mailUrgent: isPriority,
       mailSubject: subject,
       mailFromDisplay: isPriority ? FROM_DISPLAY_PRIORITY : FROM_DISPLAY_NORMAL,
-      mailApiBuild: "v2-consultation-tier-legacy-bridge-zod-fields",
+      mailApiBuild: "v2-consultation-tier-legacy-bridge-r2-embedded-tier",
     });
   } catch (e) {
     if (e?.code === "VALIDATION_ERROR" || e?.name === "ZodError") {

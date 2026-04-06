@@ -55,3 +55,26 @@ test("resolveConsultationTypeFromSendBody: 本文 normal はヘッダーより�
 test("resolveConsultationTypeFromSendBody: consultationPriority 2", () => {
   assert.equal(types.resolveConsultationTypeFromSendBody({ consultationPriority: 2 }), types.PRIORITY_GUIDANCE);
 });
+
+test("normalizeConsultationType: 数値 2 は優先導き", () => {
+  assert.equal(types.normalizeConsultationType(2), types.PRIORITY_GUIDANCE);
+});
+
+test("extractEmbeddedConsultationTier: 末尾マーカーを除去", () => {
+  const { cleanText, embeddedTierRaw } = types.extractEmbeddedConsultationTier(
+    "相談本文です\n\n__AURAFACE_SEND_TIER__:priority_guidance__"
+  );
+  assert.equal(cleanText.trimEnd(), "相談本文です");
+  assert.equal(embeddedTierRaw, "priority_guidance");
+});
+
+test("resolveConsultationTypeFromSendBody: 埋め込みのみで優先導き", () => {
+  assert.equal(types.resolveConsultationTypeFromSendBody({}, null, "priority_guidance"), types.PRIORITY_GUIDANCE);
+});
+
+test("resolveConsultationTypeFromSendBody: 明示 normal は埋め込みより優先", () => {
+  assert.equal(
+    types.resolveConsultationTypeFromSendBody({ consultationType: "normal" }, null, "priority_guidance"),
+    types.NORMAL
+  );
+});

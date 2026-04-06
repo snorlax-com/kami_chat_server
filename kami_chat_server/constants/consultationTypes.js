@@ -5,6 +5,21 @@
 const NORMAL = "normal";
 const PRIORITY_GUIDANCE = "priority_guidance";
 
+/** アプリが本文末尾に付与（JSON の他フィールドが欠落しても message だけ残る経路向け） */
+const EMBEDDED_TIER_RE = /\r?\n\r?\n__AURAFACE_SEND_TIER__:(priority_guidance|normal)__\s*$/;
+
+/**
+ * @param {unknown} raw
+ * @returns {{ cleanText: string, embeddedTierRaw: string | null }}
+ */
+function extractEmbeddedConsultationTier(raw) {
+  const s = raw != null ? String(raw) : "";
+  const m = s.match(EMBEDDED_TIER_RE);
+  if (!m) return { cleanText: s, embeddedTierRaw: null };
+  const cleanText = s.replace(EMBEDDED_TIER_RE, "").trimEnd();
+  return { cleanText, embeddedTierRaw: m[1] };
+}
+
 /** @param {unknown} v */
 function coerceUrgentFromBody(v) {
   if (v === true) return true;
@@ -22,16 +37,23 @@ function coerceUrgentFromBody(v) {
  * - 無い場合は HTTP ヘッダー X-AuraFace-Consultation-Type（[headerRaw]）
  * - consultationPriority が 2 なら優先導き
  * - 種別が未指定のとき body.urgent が真なら優先導き
- * - 明示的に "normal" を送った場合は urgent / ヘッダーがあっても通常のまま
+ * - 明示的に "normal" を送った場合は urgent / ヘッダー / 埋め込みがあっても通常のまま
  * @param {Record<string, unknown>|null|undefined} body
  * @param {string|null|undefined} headerRaw
+ * @param {string|null|undefined} embeddedTierRaw [extractEmbeddedConsultationTier] の第2戻り値
  */
-function resolveConsultationTypeFromSendBody(body, headerRaw) {
+function resolveConsultationTypeFromSendBody(body, headerRaw, embeddedTierRaw) {
   const b = body && typeof body === "object" ? body : {};
   const fromBody = b.consultationType ?? b.consultation_type;
   const bodyMissing = fromBody == null || (typeof fromBody === "string" && fromBody.trim() === "");
   if (!bodyMissing) {
     return normalizeConsultationType(fromBody);
+  }
+  if (embeddedTierRaw != null && String(embeddedTierRaw).trim() !== "") {
+    const e = normalizeConsultationType(String(embeddedTierRaw).trim());
+    if (e === PRIORITY_GUIDANCE || e === NORMAL) {
+      return e;
+    }
   }
   if (headerRaw != null && String(headerRaw).trim() !== "") {
     const h = normalizeConsultationType(String(headerRaw).trim());
@@ -53,6 +75,11 @@ function resolveConsultationTypeFromSendBody(body, headerRaw) {
 function normalizeConsultationType(v) {
   if (v === true) return PRIORITY_GUIDANCE;
   if (v == null || v === "") return NORMAL;
+  if (typeof v === "number") {
+    if (v === 2) return PRIORITY_GUIDANCE;
+    if (v === 1) return NORMAL;
+    return NORMAL;
+  }
   if (typeof v === "string") {
     const s = v.trim().toLowerCase().replace(/-/g, "_");
     if (
@@ -75,6 +102,8 @@ module.exports = {
   PRIORITY_GUIDANCE,
   normalizeConsultationType,
   resolveConsultationTypeFromSendBody,
+  extractEmbeddedConsultationTier,
+  EMBEDDED_TIER_RE,
   /** メール件名（定数） */
   SUBJECT_NORMAL: "[AuraFace] 新しい相談が届きました",
   /**

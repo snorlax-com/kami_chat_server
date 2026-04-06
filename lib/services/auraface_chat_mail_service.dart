@@ -11,6 +11,18 @@ import 'package:kami_face_oracle/config/mail_bridge_config.dart';
 const int _kTimeoutSeconds = 60;
 
 class AuraFaceChatMailService {
+  /// 本文末尾に付与。`consultationType` / `urgent` が欠落しても `message` だけ届く経路向け（サーバーで除去）。
+  static final RegExp _embeddedTierSuffix = RegExp(
+    r'\r?\n\r?\n__AURAFACE_SEND_TIER__:(?:priority_guidance|normal)__\s*$',
+    multiLine: true,
+  );
+
+  static String _messageWithEmbeddedTier(String message, String tier) {
+    final trimmed = message.trimRight();
+    final stripped = trimmed.replaceAll(_embeddedTierSuffix, '').trimRight();
+    return '$stripped\n\n__AURAFACE_SEND_TIER__:${tier}__';
+  }
+
   static const String defaultBaseUrl = 'http://127.0.0.1:3000';
 
   static const String _productionFromEnv = String.fromEnvironment('MAIL_BRIDGE_URL', defaultValue: '');
@@ -132,7 +144,7 @@ class AuraFaceChatMailService {
       'chatId': chatId,
       'userEmail': userEmail ?? '',
       'userName': userName ?? 'ユーザー',
-      'message': message,
+      'message': _messageWithEmbeddedTier(message, ct),
       'consultationType': ct,
       // プロキシ・古いゲートウェイで consultationType だけ欠落する場合の冗長（サーバー側で解決）
       'urgent': isPriority,
@@ -175,11 +187,11 @@ class AuraFaceChatMailService {
         final mailErr = body['error']?.toString();
         _log('[MailBridge] send mailSent=$mailSent error=$mailErr');
         var mailUrgent = _coerceBool(body['mailUrgent']);
-        final ct = body['consultationType']?.toString().trim();
-        if (mailUrgent == null && ct != null && ct.isNotEmpty) {
-          if (ct == ConsultationMailType.priorityGuidance) {
+        final responseCt = body['consultationType']?.toString().trim();
+        if (mailUrgent == null && responseCt != null && responseCt.isNotEmpty) {
+          if (responseCt == ConsultationMailType.priorityGuidance) {
             mailUrgent = true;
-          } else if (ct == ConsultationMailType.normal) {
+          } else if (responseCt == ConsultationMailType.normal) {
             mailUrgent = false;
           }
         }
@@ -189,7 +201,7 @@ class AuraFaceChatMailService {
           messageId: messageId,
           mailSent: mailSent,
           mailError: (mailSent == false && mailErr != null && mailErr.isNotEmpty) ? mailErr : null,
-          consultationType: ct,
+          consultationType: responseCt,
           mailUrgent: mailUrgent,
           mailSubject: body['mailSubject'] as String?,
           mailFromDisplay: body['mailFromDisplay'] as String?,
