@@ -126,6 +126,7 @@ class AuraFaceChatMailService {
   }) async {
     final uri = Uri.parse('$baseUrl/api/chat/send');
     final ct = consultationType ?? ConsultationMailType.normal;
+    final isPriority = ct == ConsultationMailType.priorityGuidance;
     final bodyMap = {
       'userId': userId,
       'chatId': chatId,
@@ -134,7 +135,8 @@ class AuraFaceChatMailService {
       'message': message,
       'consultationType': ct,
       // プロキシ・古いゲートウェイで consultationType だけ欠落する場合の冗長（サーバー側で解決）
-      'urgent': ct == ConsultationMailType.priorityGuidance,
+      'urgent': isPriority,
+      'consultationPriority': isPriority ? 2 : 1,
     };
     final bodyStr = jsonEncode(bodyMap);
     try {
@@ -142,7 +144,10 @@ class AuraFaceChatMailService {
       final res = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              'X-AuraFace-Consultation-Type': ct,
+            },
             body: bodyStr,
           )
           .timeout(const Duration(seconds: _kTimeoutSeconds));

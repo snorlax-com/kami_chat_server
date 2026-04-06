@@ -40,3 +40,18 @@ test("resolveConsultationTypeFromSendBody: 明示 normal は urgent でも通常
 test("resolveConsultationTypeFromSendBody: 空文字 + urgent で優先導き", () => {
   assert.equal(types.resolveConsultationTypeFromSendBody({ consultationType: "", urgent: true }), types.PRIORITY_GUIDANCE);
 });
+
+test("resolveConsultationTypeFromSendBody: ヘッダー相当のみで優先導き", () => {
+  assert.equal(types.resolveConsultationTypeFromSendBody({}, "priority_guidance"), types.PRIORITY_GUIDANCE);
+});
+
+test("resolveConsultationTypeFromSendBody: 本文 normal はヘッダーより優先", () => {
+  assert.equal(
+    types.resolveConsultationTypeFromSendBody({ consultationType: "normal" }, "priority_guidance"),
+    types.NORMAL
+  );
+});
+
+test("resolveConsultationTypeFromSendBody: consultationPriority 2", () => {
+  assert.equal(types.resolveConsultationTypeFromSendBody({ consultationPriority: 2 }), types.PRIORITY_GUIDANCE);
+});

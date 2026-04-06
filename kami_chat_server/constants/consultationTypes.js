@@ -18,19 +18,35 @@ function coerceUrgentFromBody(v) {
 
 /**
  * POST /api/chat/send の body から種別を決定。
- * - consultationType / consultation_type（別名）を正規化
- * - 種別フィールドが無い・空のときだけ body.urgent が真なら優先導き（中間層で consultationType だけ落ちる場合の冗長）
- * - 明示的に "normal" を送った場合は urgent があっても通常のまま
+ * - consultationType / consultation_type（別名）を最優先（非空なら正規化して返す）
+ * - 無い場合は HTTP ヘッダー X-AuraFace-Consultation-Type（[headerRaw]）
+ * - consultationPriority が 2 なら優先導き
+ * - 種別が未指定のとき body.urgent が真なら優先導き
+ * - 明示的に "normal" を送った場合は urgent / ヘッダーがあっても通常のまま
+ * @param {Record<string, unknown>|null|undefined} body
+ * @param {string|null|undefined} headerRaw
  */
-function resolveConsultationTypeFromSendBody(body) {
+function resolveConsultationTypeFromSendBody(body, headerRaw) {
   const b = body && typeof body === "object" ? body : {};
-  const raw = b.consultationType ?? b.consultation_type;
-  const rawMissing = raw == null || (typeof raw === "string" && raw.trim() === "");
-  let t = normalizeConsultationType(raw);
-  if (rawMissing && t === NORMAL && coerceUrgentFromBody(b.urgent)) {
+  const fromBody = b.consultationType ?? b.consultation_type;
+  const bodyMissing = fromBody == null || (typeof fromBody === "string" && fromBody.trim() === "");
+  if (!bodyMissing) {
+    return normalizeConsultationType(fromBody);
+  }
+  if (headerRaw != null && String(headerRaw).trim() !== "") {
+    const h = normalizeConsultationType(String(headerRaw).trim());
+    if (h === PRIORITY_GUIDANCE || h === NORMAL) {
+      return h;
+    }
+  }
+  const tier = b.consultationPriority ?? b.consultation_priority;
+  if (tier === 2 || tier === "2") {
     return PRIORITY_GUIDANCE;
   }
-  return t;
+  if (coerceUrgentFromBody(b.urgent)) {
+    return PRIORITY_GUIDANCE;
+  }
+  return NORMAL;
 }
 
 /** @param {unknown} v */
