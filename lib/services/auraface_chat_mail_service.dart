@@ -151,6 +151,13 @@ class AuraFaceChatMailService {
       'consultationPriority': isPriority ? 2 : 1,
     };
     final bodyStr = jsonEncode(bodyMap);
+    if (kReleaseMode) {
+      // 実機 logcat 用（debugPrint はリリースで無効）。例: adb logcat -s flutter:I | grep AuraFaceMail
+      // ignore: avoid_print
+      print(
+        '[AuraFaceMail] POST $uri consultationType=$ct urgent=$isPriority priorityField=${bodyMap['consultationPriority']}',
+      );
+    }
     try {
       _log('[MailBridge] POST $uri body=$bodyStr');
       final res = await http
@@ -195,6 +202,13 @@ class AuraFaceChatMailService {
             mailUrgent = false;
           }
         }
+        if (kReleaseMode) {
+          // ignore: avoid_print
+          print(
+            '[AuraFaceMail] resp status=${res.statusCode} mailSent=$mailSent mailUrgent=$mailUrgent '
+            'responseCt=$responseCt subject=${body['mailSubject']} build=${body['mailApiBuild']}',
+          );
+        }
         return SendChatResponse(
           success: true,
           chatId: body['chatId'] as String? ?? chatId,
@@ -207,6 +221,10 @@ class AuraFaceChatMailService {
           mailFromDisplay: body['mailFromDisplay'] as String?,
           mailApiBuild: body['mailApiBuild'] as String?,
         );
+      }
+      if (kReleaseMode) {
+        // ignore: avoid_print
+        print('[AuraFaceMail] send failed status=${res.statusCode} body=${res.body}');
       }
       final err = body?['message']?.toString() ?? body?['error']?.toString() ?? 'HTTP ${res.statusCode}';
       return SendChatResponse(success: false, error: err);
