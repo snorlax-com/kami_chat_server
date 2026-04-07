@@ -22,6 +22,7 @@ test("通常相談: 件名が通常用である", () => {
   });
   assert.equal(subject, types.SUBJECT_NORMAL);
   assert.ok(subject.includes("[AuraFace]"));
+  assert.ok(subject.includes("至急ではない") || subject.includes("通常"));
   assert.ok(!subject.includes("優先導き"));
 });
 

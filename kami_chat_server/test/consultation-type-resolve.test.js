@@ -52,6 +52,35 @@ test("resolveConsultationTypeFromSendBody: 本文 normal はヘッダーより�
   );
 });
 
+test("resolveConsultationTypeFromSendBody: 本文 priority_guidance はヘッダー normal より優先", () => {
+  assert.equal(
+    types.resolveConsultationTypeFromSendBody({ consultationType: "priority_guidance" }, "normal"),
+    types.PRIORITY_GUIDANCE
+  );
+});
+
+test("resolveConsultationTypeFromSendBody: body が誤って normal でも urgent+埋め込み至急なら至急", () => {
+  assert.equal(
+    types.resolveConsultationTypeFromSendBody(
+      { consultationType: "normal", urgent: true, consultationPriority: 1 },
+      null,
+      "priority_guidance"
+    ),
+    types.PRIORITY_GUIDANCE
+  );
+});
+
+test("resolveConsultationTypeFromSendBody: body が誤って normal でも priority2+埋め込み至急なら至急", () => {
+  assert.equal(
+    types.resolveConsultationTypeFromSendBody(
+      { consultationType: "normal", urgent: false, consultationPriority: 2 },
+      null,
+      "priority_guidance"
+    ),
+    types.PRIORITY_GUIDANCE
+  );
+});
+
 test("resolveConsultationTypeFromSendBody: consultationPriority 2", () => {
   assert.equal(types.resolveConsultationTypeFromSendBody({ consultationPriority: 2 }), types.PRIORITY_GUIDANCE);
 });

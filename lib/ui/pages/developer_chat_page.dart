@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/services/currency_service.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
+import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 
 /// メールブリッジ（kami_chat_server）上のスレッドで、開発者返信の確認・追記。
@@ -195,6 +196,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
         userId: _userId,
         chatId: _chatId!,
         message: text,
+        sendSource: ConsultationSendSource.developerChatFollowUp,
         userName: '占い相談ユーザー',
         userEmail: '',
         consultationType: mailConsultationType,

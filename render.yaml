@@ -1,6 +1,10 @@
 # Render Blueprint: モノレポから kami_chat_server のみデプロイ
 # https://render.com/docs/monorepo-support#setting-a-root-directory
 #
+# 実機アプリ（Flutter）は kami_chat_server の POST /api/chat/send を前提とする。
+# Root Directory を auraface-chat-mail-bridge にすると別実装が動き、至急/通常の件名が
+# 一致しないなどの不整合が起きうる。本 Blueprint は rootDir: kami_chat_server のみ。
+#
 # ダッシュボードで既存サービスがある場合:
 #   Settings → Root Directory → kami_chat_server に変更して手動デプロイ
 #
@@ -22,6 +26,17 @@ services:
         sync: false
       - key: ADMIN_EMAIL
         sync: false
+      # 任意。設定時は主通知先として ADMIN_EMAIL より優先（resolveConsultationNotificationRecipients）。
+      # - key: DEV_NOTIFICATION_EMAIL
+      #   sync: false
+      # 任意。至急（priority_guidance）の第2宛先。未設定時は emergencyauraface@gmail.com。
+      # - key: EMERGENCY_NOTIFICATION_EMAIL
+      #   sync: false
+      # 任意。種別ごとに主宛先だけ上書き（未設定時は DEV → ADMIN）。
+      # - key: MAIL_TO_PRIORITY
+      #   sync: false
+      # - key: MAIL_TO_NORMAL
+      #   sync: false
       - key: MAIL_FROM
         sync: false
       - key: TOKEN_SECRET

@@ -8,6 +8,8 @@ import 'package:kami_face_oracle/services/support_chat_service.dart';
 import 'package:kami_face_oracle/services/currency_service.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
+import 'package:kami_face_oracle/config/consultation_send_contract.dart';
+import 'package:kami_face_oracle/services/consultation_mail_new_send.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
 import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
@@ -96,6 +98,9 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
 
   Future<void> _send({required bool urgent, required int coinCost, int? gemCost}) async {
     if (_controller.text.trim().isEmpty) return;
+    final trimmedBody = _controller.text.trim();
+    final bodyText =
+        AuraFaceChatMailService.applyNewUrgentConsultationPrefix(urgent: urgent, message: trimmedBody);
 
     // コイン/ジェムの残高チェック
     if (urgent && gemCost != null) {
@@ -134,7 +139,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
 
     // チャットメッセージを作成
     final chat = [
-      ChatMessage(role: 'user', text: _controller.text.trim()),
+      ChatMessage(role: 'user', text: bodyText),
     ];
 
     // 既存のメッセージも含める
@@ -157,7 +162,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
     if (response.success && response.cid != null) {
       // 送信したメッセージをUIに追加
       setState(() {
-        _messages.add(ChatMessage(role: 'user', text: _controller.text.trim()));
+        _messages.add(ChatMessage(role: 'user', text: bodyText));
         _currentCid = response.cid;
       });
 
@@ -166,22 +171,27 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
 
       // 開発者へGmail通知（メールブリッジ）。URL未設定時は本番URL or ローカルを使用
       final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
+      final bridgeUrl = AuraFaceChatMailService.consultationSendBaseUrl(savedUrl);
       bool? mailSent;
+      SendChatResponse? mailBridgeRes;
       try {
-        final mailService = AuraFaceChatMailService(baseUrl: savedUrl);
+        final mailService = AuraFaceChatMailService(baseUrl: bridgeUrl);
         final chatId = 'consultation_new_${userId}_${DateTime.now().millisecondsSinceEpoch}';
-        final mailRes = await mailService.send(
+        final mailCt = ConsultationMailNewSend.consultationTypeForPref(urgent: urgent);
+        final mailRes = await ConsultationMailNewSend.send(
+          mailService: mailService,
           userId: userId,
           chatId: chatId,
-          message: _controller.text.trim(),
+          message: bodyText,
+          sendSource: ConsultationSendSource.consultationPageNew,
+          urgent: urgent,
           userName: '占い相談ユーザー',
           userEmail: '',
-          consultationType:
-              urgent ? ConsultationMailType.priorityGuidance : ConsultationMailType.normal,
         );
+        mailBridgeRes = mailRes;
         mailSent = mailRes.mailSent;
         if (mailRes.success) {
-          await DeveloperChatPref.setActiveChatId(chatId);
+          await DeveloperChatPref.setActiveChatId(chatId, consultationType: mailCt);
         }
         if (mounted && mailRes.success && mailRes.mailSent == false) {
           final detail = mailRes.mailError != null && mailRes.mailError!.isNotEmpty
@@ -203,12 +213,29 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
 
       if (mounted) {
         final coinLine = urgent
-            ? '至急相談を送信しました（消費: ${gemCost ?? 0} ジェム）'
-            : '通常相談を送信しました（消費: $coinCost コイン）';
+            ? '【至急・優先導き】至急相談を送信しました（消費: ${gemCost ?? 0} ジェム）'
+            : '【通常】通常相談を送信しました（消費: $coinCost コイン）';
         if (mailSent == true) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(coinLine)),
-          );
+          final resolved = (mailBridgeRes?.sendDebug?['debugResolvedConsultationType'] ??
+                  mailBridgeRes?.consultationType)
+              ?.toString()
+              .trim();
+          if (urgent && resolved == ConsultationMailType.normal) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '$coinLine\n'
+                  '【不整合】サーバーは「通常」として処理しました。Gmail も【通常相談】の可能性があります。接続先 URL と kami_chat_server のデプロイを確認してください。',
+                ),
+                backgroundColor: Colors.red.shade900,
+                duration: const Duration(seconds: 14),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(coinLine)),
+            );
+          }
         } else if (mailSent == null) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

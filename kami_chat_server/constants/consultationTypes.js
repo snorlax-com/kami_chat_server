@@ -20,6 +20,24 @@ function extractEmbeddedConsultationTier(raw) {
   return { cleanText, embeddedTierRaw: m[1] };
 }
 
+/**
+ * 至急相談の本文先頭に（緊急）を付与（クライアント漏れ・古いアプリの救済）。
+ * Flutter の applyNewUrgentConsultationPrefix と同等の判定。
+ * @param {string} message trim 済み想定
+ * @returns {string}
+ */
+function ensurePriorityGuidanceBodyPrefix(message) {
+  const raw = String(message ?? "");
+  const withoutBom = raw.replace(/^\uFEFF+/, "");
+  const lead = withoutBom.replace(/^\s+/, "");
+  if (lead === "") return "（緊急）";
+  const markers = ["（緊急）", "(緊急)", "（緊急)", "(緊急）", "【緊急】", "[緊急]"];
+  for (let i = 0; i < markers.length; i++) {
+    if (lead.startsWith(markers[i])) return raw;
+  }
+  return "（緊急）" + withoutBom;
+}
+
 /** @param {unknown} v */
 function coerceUrgentFromBody(v) {
   if (v === true) return true;
@@ -46,7 +64,30 @@ function resolveConsultationTypeFromSendBody(body, headerRaw, embeddedTierRaw) {
   const b = body && typeof body === "object" ? body : {};
   const fromBody = b.consultationType ?? b.consultation_type;
   const bodyMissing = fromBody == null || (typeof fromBody === "string" && fromBody.trim() === "");
+  const rawLower = !bodyMissing ? String(fromBody).trim().toLowerCase().replace(/-/g, "_") : "";
+  const embeddedStr = embeddedTierRaw != null ? String(embeddedTierRaw).trim() : "";
+  const embeddedIsPriority = embeddedStr === PRIORITY_GUIDANCE;
+  const priority2 =
+    b.consultationPriority === 2 ||
+    b.consultation_priority === 2 ||
+    b.consultationPriority === "2" ||
+    b.consultation_priority === "2";
+  /**
+   * body.consultationType だけ誤って normal でも、本文末尾マーカーが至急かつ urgent または priority=2 なら至急。
+   * （ヘッダー欠落の端末でも効くよう、ヘッダー一致は条件に含めない）
+   */
+  if (rawLower === "normal" && embeddedIsPriority && (coerceUrgentFromBody(b.urgent) || priority2)) {
+    return PRIORITY_GUIDANCE;
+  }
+
   if (!bodyMissing) {
+    /** API body で明示された normal / priority_guidance */
+    if (rawLower === "normal") {
+      return NORMAL;
+    }
+    if (rawLower === "priority_guidance" || rawLower === "priorityguidance") {
+      return PRIORITY_GUIDANCE;
+    }
     return normalizeConsultationType(fromBody);
   }
   if (embeddedTierRaw != null && String(embeddedTierRaw).trim() !== "") {
@@ -103,9 +144,11 @@ module.exports = {
   normalizeConsultationType,
   resolveConsultationTypeFromSendBody,
   extractEmbeddedConsultationTier,
+  ensurePriorityGuidanceBodyPrefix,
   EMBEDDED_TIER_RE,
   /** メール件名（定数） */
-  SUBJECT_NORMAL: "[AuraFace] 新しい相談が届きました",
+  /** Gmail 一覧で至急と絶対に混ざらないよう「至急ではない」を件名コアに含める */
+  SUBJECT_NORMAL: "［通常のみ・至急ではありません］[AuraFace] 新しい相談が届きました",
   /**
    * 至急（占い相談の優先導き）。通常は [AuraFace] 始まりなので、先頭を【至急占い】にして一覧・通知の一行目を完全に別物にする。
    */

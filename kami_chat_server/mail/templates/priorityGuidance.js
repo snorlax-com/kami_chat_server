@@ -48,7 +48,7 @@ ${p.chatId}
 ■ メッセージID
 ${p.messageId}
 
-■ 内容（冒頭）
+■ 相談本文（先頭200文字・至急は「（緊急）」から始まります）
 ${preview}
 
 ■ 返信ページ
@@ -89,7 +89,7 @@ ${tag}
         <tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;">■ チャットID</td><td style="padding:6px 0;"><code style="word-break:break-all;">${safe.chatId}</code></td></tr>
         <tr><td style="padding:6px 12px 6px 0;color:#555;vertical-align:top;">■ メッセージID</td><td style="padding:6px 0;">${safe.messageId}</td></tr>
       </table>
-      <p style="margin:16px 0 8px;font-weight:600;">■ 内容（冒頭）</p>
+      <p style="margin:16px 0 8px;font-weight:600;">■ 相談本文（先頭200文字・至急は「（緊急）」から始まります）</p>
       <div style="white-space:pre-wrap;padding:14px;border:1px solid #fcd34d;border-radius:10px;background:#fffbeb;">${safe.preview}</div>
       <p style="margin-top:20px;">
         <a href="${safe.url}" style="display:inline-block;padding:12px 20px;background:#b45309;color:#fff;border-radius:10px;text-decoration:none;font-weight:700;">返信ページを開く（優先）</a>

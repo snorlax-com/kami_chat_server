@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 
 class CloudService {
   static bool _initialized = false;
@@ -52,6 +53,8 @@ class CloudService {
     await FirebaseFirestore.instance.collection('users').doc(uid).collection('consultations').add({
       'text': text,
       'urgent': urgent,
+      'consultationType':
+          urgent ? ConsultationMailType.priorityGuidance : ConsultationMailType.normal,
       'cost': cost,
       'status': 'pending', // pending, answered, expired
       'deadline': deadline.toIso8601String(),

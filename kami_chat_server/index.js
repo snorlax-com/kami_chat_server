@@ -26,6 +26,16 @@ function escapeHtml(str = "") {
     .replace(/'/g, "&#039;");
 }
 
+/** Gmail 件名先頭の一時デバッグ（どこで normal 化したか特定用） */
+function buildDebugSubjectPrefix(rawCt, resolved, urgent, priority, headerCt, embedded) {
+  const esc = (v) =>
+    String(v ?? "")
+      .replace(/\|/g, "｜")
+      .replace(/\]/g, "］")
+      .replace(/\[/g, "［");
+  return `[raw:${esc(rawCt)}|resolved:${esc(resolved)}|urgent:${esc(urgent)}|priority:${esc(priority)}|header:${esc(headerCt)}|embedded:${esc(embedded)}]`;
+}
+
 // 疎通確認用（E2E / 監視ツール向けプレーンテキスト）
 app.get("/", (req, res) => {
   res.type("text/plain; charset=utf-8").send("OK");
@@ -53,6 +63,21 @@ app.post("/api/chat/send", async (req, res) => {
       headerCt.length > 0 ? headerCt : null,
       embeddedTierRaw
     );
+    const debugReceivedConsultationType = body.consultationType ?? body.consultation_type ?? null;
+    const debugReceivedConsultationPriority = body.consultationPriority ?? body.consultation_priority ?? null;
+    const debugReceivedUrgent = body.urgent ?? null;
+    const debugHeaderConsultationType = headerCt.length > 0 ? headerCt : null;
+    const debugReceivedHeaderConsultationType = debugHeaderConsultationType;
+    const debugEmbeddedTier = embeddedTierRaw;
+    const debugResolvedConsultationType = consultationType;
+    const debugSubjectPrefix = buildDebugSubjectPrefix(
+      debugReceivedConsultationType ?? "",
+      consultationType,
+      debugReceivedUrgent,
+      debugReceivedConsultationPriority ?? "",
+      headerCt,
+      embeddedTierRaw ?? ""
+    );
     console.log("[chat/send] consultationType", {
       raw: body.consultationType ?? body.consultation_type,
       header: headerCt || null,
@@ -75,6 +100,7 @@ app.post("/api/chat/send", async (req, res) => {
           urgentReception: ur,
         });
       }
+      text = types.ensurePriorityGuidanceBodyPrefix(text);
     }
     if (!store.has(cid)) store.set(cid, []);
     const createdAt = Date.now();
@@ -113,6 +139,7 @@ app.post("/api/chat/send", async (req, res) => {
         consultationType,
         messageId: id,
         receivedAtMs: createdAt,
+        debugSubjectPrefix,
       });
       console.log(
         JSON.stringify({
@@ -129,13 +156,16 @@ app.post("/api/chat/send", async (req, res) => {
       console.log("[chat/send] mail_sent resend_ok", {
         messageId: id,
         consultationType,
-        urgent: consultationType === types.PRIORITY_GUIDANCE,
-        to: process.env.ADMIN_EMAIL,
+        to: mailResult?.debugMailTo ?? null,
         mailId: mailResult?.id,
       });
     } catch (err) {
       mailError = err;
-      console.error("[chat/send] mail", err.message);
+      console.error("[chat/send] mail_send_failed", {
+        message: err.message,
+        consultationType,
+        stack: err.stack,
+      });
     }
 
     // メールまで成功した場合は status: "ok"（E2E 期待値と一致）
@@ -153,7 +183,16 @@ app.post("/api/chat/send", async (req, res) => {
       mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
       mailSubject: mailError ? null : mailResult?.subject ?? null,
       mailFromDisplay: mailError ? null : mailResult?.fromDisplay ?? null,
-      mailApiBuild: "v2-consultation-tier-r7-embedded-message-tier",
+      mailApiBuild: "v2-consultation-tier-r11-override-normal-if-embedded-urgent",
+      debugReceivedConsultationType,
+      debugReceivedUrgent,
+      debugReceivedConsultationPriority,
+      debugHeaderConsultationType,
+      debugReceivedHeaderConsultationType,
+      debugEmbeddedTier,
+      debugResolvedConsultationType,
+      debugMailSubject: mailError ? null : mailResult?.subject ?? null,
+      debugMailTo: mailError ? null : mailResult?.debugMailTo ?? process.env.ADMIN_EMAIL ?? null,
     });
   } catch (err) {
     console.error("[chat/send] error", err);

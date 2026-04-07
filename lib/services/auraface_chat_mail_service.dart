@@ -2,9 +2,10 @@
 // チャットAPI（POST /api/chat/send, GET /api/chat/thread）本番: https://kami-chat-server.onrender.com
 
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show debugPrint, kDebugMode, kReleaseMode;
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode, kProfileMode, kReleaseMode;
 import 'package:http/http.dart' as http;
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
+import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/config/mail_bridge_config.dart';
 
 /// Render 無料枠の初回遅延を考慮したタイムアウト（秒）
@@ -21,6 +22,26 @@ class AuraFaceChatMailService {
     final trimmed = message.trimRight();
     final stripped = trimmed.replaceAll(_embeddedTierSuffix, '').trimRight();
     return '$stripped\n\n__AURAFACE_SEND_TIER__:${tier}__';
+  }
+
+  /// 至急の**新規**相談で、Firestore / 画面表示 / メール本文を揃えるための接頭辞付き本文（通常送信はそのまま）。
+  static String applyNewUrgentConsultationPrefix({required bool urgent, required String message}) {
+    if (!urgent) return message;
+    // BOM や先頭空白は判定だけ除去し、本文は元のまま付与（ユーザー入力のインデントは維持）
+    final withoutBom = message.replaceFirst(RegExp(r'^\uFEFF+'), '');
+    final lead = withoutBom.trimLeft();
+    if (lead.isEmpty) return '（緊急）';
+    const full = '（緊急）';
+    const half = '(緊急)';
+    if (lead.startsWith(full) ||
+        lead.startsWith(half) ||
+        lead.startsWith('（緊急)') ||
+        lead.startsWith('(緊急）') ||
+        lead.startsWith('【緊急】') ||
+        lead.startsWith('[緊急]')) {
+      return message;
+    }
+    return '$full$withoutBom';
   }
 
   static const String defaultBaseUrl = 'http://127.0.0.1:3000';
@@ -85,6 +106,28 @@ class AuraFaceChatMailService {
     if (kDebugMode) debugPrint(msg);
   }
 
+  /// 実機リリース／プロファイルでも logcat に出す（タグ統一: AuraFaceMailSend）
+  static void _logSendLine(String line) {
+    final msg = '[AuraFaceMailSend] $line';
+    if (kReleaseMode || kProfileMode) {
+      // ignore: avoid_print
+      print(msg);
+    } else {
+      debugPrint(msg);
+    }
+  }
+
+  static void _warnUrlMismatchIfRelease(String usedBaseUrl) {
+    if (!kReleaseMode && !kProfileMode) return;
+    final expected = productionBaseUrl?.trim();
+    if (expected == null || expected.isEmpty) return;
+    final u = _normalizeBaseUrl(usedBaseUrl);
+    final e = _normalizeBaseUrl(expected);
+    if (u != e) {
+      _logSendLine('WARN baseUrl!=本番定数 used=$u expected=$e （mail_bridge_base_url 等の誤接続の可能性）');
+    }
+  }
+
   /// JSON / 中間プロキシで bool が文字列や数値になる場合の吸収
   static bool? _coerceBool(dynamic v) {
     if (v == null) return null;
@@ -126,47 +169,132 @@ class AuraFaceChatMailService {
     }
   }
 
+  /// 新規相談（占い相談トップ）専用。[urgent] だけで consultationType / urgent / priority / ヘッダー / 末尾マーカーを固定する。
+  Future<SendChatResponse> sendLockedNewConsultation({
+    required String userId,
+    required String chatId,
+    required String message,
+    required String sendSource,
+    required bool urgent,
+    String? userEmail,
+    String? userName,
+  }) {
+    final ct = urgent ? ConsultationMailType.priorityGuidance : ConsultationMailType.normal;
+    final urgentVal = urgent;
+    final priorityVal = urgent ? 2 : 1;
+    var bodyForMail = applyNewUrgentConsultationPrefix(urgent: urgent, message: message);
+    if (urgent) {
+      final check = bodyForMail.replaceFirst(RegExp(r'^\uFEFF+'), '').trimLeft();
+      final hasMarker = check.startsWith('（緊急）') ||
+          check.startsWith('(緊急)') ||
+          check.startsWith('（緊急)') ||
+          check.startsWith('(緊急）') ||
+          check.startsWith('【緊急】') ||
+          check.startsWith('[緊急]');
+      if (!hasMarker) {
+        bodyForMail = '（緊急）$bodyForMail';
+      }
+    }
+    return _sendVerifiedPayload(
+      userId: userId,
+      chatId: chatId,
+      rawUserMessage: bodyForMail,
+      sendSource: sendSource,
+      consultationType: ct,
+      urgent: urgentVal,
+      consultationPriority: priorityVal,
+      userEmail: userEmail,
+      userName: userName,
+    );
+  }
+
   /// ユーザーメッセージを送信。サーバーが success:true または status が ok/received/saved_but_mail_failed で成功とみなす。
-  /// [consultationType] … `ConsultationMailType.normal` / `priorityGuidance`。未指定時は通常相談。
+  /// [consultationType] … 未指定は `normal`。至急は必ず `priority_guidance` を渡すこと。
+  /// [sendSource] … どの画面から送ったか（logcat 用）。**新規相談は [sendLockedNewConsultation] を使うこと。**
   Future<SendChatResponse> send({
     required String userId,
     required String chatId,
     required String message,
+    required String sendSource,
     String? userEmail,
     String? userName,
     String? consultationType,
   }) async {
-    final uri = Uri.parse('$baseUrl/api/chat/send');
     final ct = consultationType ?? ConsultationMailType.normal;
-    final isPriority = ct == ConsultationMailType.priorityGuidance;
-    final bodyMap = {
+    final urgentVal = ConsultationSendContract.urgentFieldForType(ct);
+    final priorityVal = ConsultationSendContract.consultationPriorityForType(ct);
+    return _sendVerifiedPayload(
+      userId: userId,
+      chatId: chatId,
+      rawUserMessage: message,
+      sendSource: sendSource,
+      consultationType: ct,
+      urgent: urgentVal,
+      consultationPriority: priorityVal,
+      userEmail: userEmail,
+      userName: userName,
+    );
+  }
+
+  Future<SendChatResponse> _sendVerifiedPayload({
+    required String userId,
+    required String chatId,
+    required String rawUserMessage,
+    required String sendSource,
+    required String consultationType,
+    required bool urgent,
+    required int consultationPriority,
+    String? userEmail,
+    String? userName,
+  }) async {
+    _warnUrlMismatchIfRelease(baseUrl);
+    final uri = Uri.parse('$baseUrl/api/chat/send');
+    final prod = productionBaseUrl;
+    _logSendLine(
+      'baseUrl_effective=$baseUrl production_const=${prod ?? "(null)"} '
+      'MAIL_BRIDGE_URL_dartDefine=${_productionFromEnv.isNotEmpty ? _productionFromEnv : "(unset)"}',
+    );
+
+    final ct = consultationType;
+    final payloadMessage = _messageWithEmbeddedTier(rawUserMessage, ct);
+    final markerPreview = payloadMessage.length > 120
+        ? payloadMessage.substring(payloadMessage.length - 120)
+        : payloadMessage;
+
+    _logSendLine(
+      'pre_send sendSource=$sendSource url=$uri chatId=$chatId '
+      'consultationType=$ct urgent=$urgent consultationPriority=$consultationPriority '
+      'headerX-AuraFace-Consultation-Type=$ct messageTail="$markerPreview"',
+    );
+
+    final bodyMap = <String, dynamic>{
       'userId': userId,
       'chatId': chatId,
       'userEmail': userEmail ?? '',
       'userName': userName ?? 'ユーザー',
-      'message': _messageWithEmbeddedTier(message, ct),
+      'message': payloadMessage,
       'consultationType': ct,
-      // プロキシ・古いゲートウェイで consultationType だけ欠落する場合の冗長（サーバー側で解決）
-      'urgent': isPriority,
-      'consultationPriority': isPriority ? 2 : 1,
+      /** 冗長: 一部プロキシで consultationType だけ欠落した場合のログ・将来のサーバー参照用 */
+      'aurafaceSendTier': ct,
+      'urgent': urgent,
+      'consultationPriority': consultationPriority,
     };
     final bodyStr = jsonEncode(bodyMap);
-    if (kReleaseMode) {
-      // 実機 logcat 用（debugPrint はリリースで無効）。例: adb logcat -s flutter:I | grep AuraFaceMail
-      // ignore: avoid_print
-      print(
-        '[AuraFaceMail] POST $uri consultationType=$ct urgent=$isPriority priorityField=${bodyMap['consultationPriority']}',
-      );
-    }
+    final headerMap = <String, String>{
+      'Content-Type': 'application/json',
+      'X-AuraFace-Consultation-Type': ct,
+    };
+
+    _logSendLine('wire_headers json=${jsonEncode(headerMap)}');
+    _logSendLine('wire_body_json=$bodyStr');
+    _logSendLine('wire_message_final=$payloadMessage');
+
     try {
       _log('[MailBridge] POST $uri body=$bodyStr');
       final res = await http
           .post(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              'X-AuraFace-Consultation-Type': ct,
-            },
+            headers: headerMap,
             body: bodyStr,
           )
           .timeout(const Duration(seconds: _kTimeoutSeconds));
@@ -202,13 +330,15 @@ class AuraFaceChatMailService {
             mailUrgent = false;
           }
         }
-        if (kReleaseMode) {
-          // ignore: avoid_print
-          print(
-            '[AuraFaceMail] resp status=${res.statusCode} mailSent=$mailSent mailUrgent=$mailUrgent '
-            'responseCt=$responseCt subject=${body['mailSubject']} build=${body['mailApiBuild']}',
-          );
-        }
+        final dbg = _extractSendDebug(body);
+        _logSendLine(
+          'resp_json=${jsonEncode(body)}',
+        );
+        _logSendLine(
+          'resp summary status=${res.statusCode} mailSent=$mailSent mailUrgent=$mailUrgent '
+          'responseCt=$responseCt mailSubject=${body['mailSubject']} debugMailSubject=${body['debugMailSubject']} '
+          'debugResolved=${dbg?['debugResolvedConsultationType']} debugHeader=${dbg?['debugHeaderConsultationType']}',
+        );
         return SendChatResponse(
           success: true,
           chatId: body['chatId'] as String? ?? chatId,
@@ -220,23 +350,41 @@ class AuraFaceChatMailService {
           mailSubject: body['mailSubject'] as String?,
           mailFromDisplay: body['mailFromDisplay'] as String?,
           mailApiBuild: body['mailApiBuild'] as String?,
+          sendDebug: dbg,
         );
       }
-      if (kReleaseMode) {
-        // ignore: avoid_print
-        print('[AuraFaceMail] send failed status=${res.statusCode} body=${res.body}');
-      }
+      _logSendLine('send_failed status=${res.statusCode} body=${res.body}');
       final err = body?['message']?.toString() ?? body?['error']?.toString() ?? 'HTTP ${res.statusCode}';
       return SendChatResponse(success: false, error: err);
     } catch (e, st) {
       final classified = _classifyError(e);
       _log('[MailBridge] send exception: $classified');
+      _logSendLine('exception $classified');
       if (kDebugMode) debugPrint('[MailBridge] $st');
       return SendChatResponse(
         success: false,
         error: classified.startsWith('エラー') ? classified : 'ネットワークエラー: $classified',
       );
     }
+  }
+
+  static Map<String, dynamic>? _extractSendDebug(Map<String, dynamic> body) {
+    const keys = [
+      'debugReceivedConsultationType',
+      'debugReceivedConsultationPriority',
+      'debugReceivedUrgent',
+      'debugHeaderConsultationType',
+      'debugReceivedHeaderConsultationType',
+      'debugEmbeddedTier',
+      'debugResolvedConsultationType',
+      'debugMailSubject',
+      'debugMailTo',
+    ];
+    final out = <String, dynamic>{};
+    for (final k in keys) {
+      if (body.containsKey(k)) out[k] = body[k];
+    }
+    return out.isEmpty ? null : out;
   }
 
   /// スレッド取得。since は Unix ミリ秒で指定するとその時刻以降のみ取得。
@@ -364,6 +512,9 @@ class SendChatResponse {
   /// サーバー実装世代。`v2-consultation-tier` 接頭辞なら種別・件名エコー対応。
   final String? mailApiBuild;
 
+  /// サーバー `debug*` 応答（存在するキーのみ）
+  final Map<String, dynamic>? sendDebug;
+
   SendChatResponse({
     required this.success,
     this.chatId,
@@ -376,6 +527,7 @@ class SendChatResponse {
     this.mailSubject,
     this.mailFromDisplay,
     this.mailApiBuild,
+    this.sendDebug,
   });
 }
 

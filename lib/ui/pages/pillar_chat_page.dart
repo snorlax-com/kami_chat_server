@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kami_face_oracle/models/personality_type_detail.dart';
 import 'package:kami_face_oracle/services/personality_type_detail_service.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
+import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 
@@ -146,12 +147,16 @@ class _PillarChatPageState extends State<PillarChatPage> {
         userId: userId,
         chatId: chatId,
         message: payload,
+        sendSource: ConsultationSendSource.pillarChatTutorial,
         userName: 'チュートリアル（柱チャット）',
         userEmail: '',
         consultationType: ConsultationMailType.normal,
       );
       if (res.success) {
-        await DeveloperChatPref.setActiveChatId(chatId);
+        await DeveloperChatPref.setActiveChatId(
+          chatId,
+          consultationType: ConsultationMailType.normal,
+        );
       }
       if (!mounted) return;
       if (res.success && res.mailSent == false) {

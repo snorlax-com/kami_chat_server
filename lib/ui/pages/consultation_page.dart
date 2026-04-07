@@ -6,22 +6,43 @@ import 'package:kami_face_oracle/services/cloud_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
+import 'package:kami_face_oracle/config/consultation_send_contract.dart';
+import 'package:kami_face_oracle/services/consultation_mail_new_send.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
 import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
 
 /// Firestore 等で bool が混在しても履歴の「至急」表示を安定させる
 bool _coerceUrgentFlag(dynamic v) {
+  if (v == null) return false;
   if (v == true) return true;
   if (v == false) return false;
-  if (v == 1) return true;
-  if (v == 0) return false;
+  if (v is num) return v != 0;
   if (v is String) {
     final s = v.trim().toLowerCase();
     if (s == 'true' || s == '1') return true;
     if (s == 'false' || s == '0') return false;
   }
   return false;
+}
+
+/// 履歴1件が至急か（urgent フィールド + consultationType の冗長判定）
+bool _isUrgentConsultationRecord(Map<String, dynamic> item) {
+  if (_coerceUrgentFlag(item['urgent'])) return true;
+  final ct = item['consultationType']?.toString().trim() ??
+      item['consultation_type']?.toString().trim();
+  if (ct == null || ct.isEmpty) return false;
+  final lower = ct.toLowerCase();
+  if (lower == ConsultationMailType.priorityGuidance) return true;
+  if (lower == 'urgent') return true;
+  return false;
+}
+
+/// サーバーが返した解決済み種別（API の debugResolved または consultationType）
+String? _resolvedTierFromBridge(SendChatResponse? bridge) {
+  final d = bridge?.sendDebug?['debugResolvedConsultationType']?.toString().trim();
+  if (d != null && d.isNotEmpty) return d;
+  return bridge?.consultationType?.trim();
 }
 
 /// サーバー応答と至急ボタンの一致をユーザーに示す（Render 未更新時の切り分け用）
@@ -35,7 +56,27 @@ void _showMailSentFeedback(
 }) {
   if (!mailSent) return;
 
-  final v2 = (bridge?.mailApiBuild ?? '').trim().startsWith('v2-consultation-tier');
+  final resolvedTier = _resolvedTierFromBridge(bridge);
+
+  /// 至急で押したのにサーバーが normal と答えたときは最優先で警告（Gmail も通常件名のはず）
+  if (urgent &&
+      resolvedTier == ConsultationMailType.normal) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$coinLine\n'
+          '【不整合】サーバーは「通常相談」として処理しました（debugResolvedConsultationType または consultationType が normal）。'
+          'Gmail 件名も【通常相談】になっている可能性が高いです。実機ログの [AuraFaceMailSend]・接続先 URL・Render の kami_chat_server デプロイを確認してください。',
+        ),
+        backgroundColor: Colors.red.shade900,
+        duration: const Duration(seconds: 16),
+      ),
+    );
+    return;
+  }
+
+  final buildTag = (bridge?.mailApiBuild ?? '').trim();
+  final v2 = buildTag.contains('v2-consultation-tier');
   final ct = (bridge?.consultationType ?? '').trim();
   final serverPriority =
       bridge?.mailUrgent == true || ct == ConsultationMailType.priorityGuidance;
@@ -73,7 +114,7 @@ void _showMailSentFeedback(
   }
 
   final extraUrgent = urgent && serverPriority
-      ? ' Gmailでは件名が「【至急占い・緊急】」で始まり、差出人は「至急占い相談｜…」です（通常の「[AuraFace] 新しい相談」と一覧が別になります）。'
+      ? ' Gmail 件名は「【至急相談】」またはデバッグ接頭辞付きの至急用で、解決種別は priority_guidance です。'
       : '';
 
   if (useFirestore) {
@@ -87,7 +128,7 @@ void _showMailSentFeedback(
   } else {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('相談内容を開発者にメールで送りました。$extraUrgent'),
+        content: Text('$coinLine。開発者にメールで通知しました。$extraUrgent'),
         backgroundColor: Colors.green,
         duration: Duration(seconds: urgent ? 8 : 4),
       ),
@@ -176,9 +217,13 @@ class _ConsultationPageState extends State<ConsultationPage> {
       }
     }
 
+    final trimmedBody = _controller.text.trim();
+    final bodyText =
+        AuraFaceChatMailService.applyNewUrgentConsultationPrefix(urgent: urgent, message: trimmedBody);
+
     if (useFirestore) {
       await CloudService.addConsultation(
-        _controller.text.trim(),
+        bodyText,
         urgent: urgent,
         cost: 1,
       );
@@ -204,14 +249,16 @@ class _ConsultationPageState extends State<ConsultationPage> {
     try {
       final mailService = AuraFaceChatMailService(baseUrl: bridgeUrl);
       final chatId = 'consultation_${userId}_${DateTime.now().millisecondsSinceEpoch}';
-      final res = await mailService.send(
+      final mailCt = ConsultationMailNewSend.consultationTypeForPref(urgent: urgent);
+      final res = await ConsultationMailNewSend.send(
+        mailService: mailService,
         userId: userId,
         chatId: chatId,
-        message: _controller.text.trim(),
+        message: bodyText,
+        sendSource: ConsultationSendSource.consultationPage,
+        urgent: urgent,
         userName: '占い相談ユーザー',
         userEmail: '',
-        consultationType:
-            urgent ? ConsultationMailType.priorityGuidance : ConsultationMailType.normal,
       );
       mailBridgeRes = res;
       debugPrint(
@@ -221,7 +268,7 @@ class _ConsultationPageState extends State<ConsultationPage> {
       mailSuccess = res.success;
       mailSentReport = res.mailSent;
       if (res.success) {
-        await DeveloperChatPref.setActiveChatId(chatId);
+        await DeveloperChatPref.setActiveChatId(chatId, consultationType: mailCt);
       }
       if (res.success && res.mailSent == false && mounted) {
         final detail = res.mailError != null && res.mailError!.isNotEmpty
@@ -296,10 +343,10 @@ class _ConsultationPageState extends State<ConsultationPage> {
 
     await _load();
     if (mounted && mailSuccess) {
-      // 画面上の種別は「押したボタン」基準（至急で押したなら常に至急表記。Gmail文言はサーバー応答で SnackBar 追記）
+      // 画面上の種別は「押したボタン」基準。先頭に【至急】を付けて通常行との取り違えを防ぐ
       final coinLine = urgent
-          ? '至急相談を送信しました（優先券1枚・本日の至急枠を1回使用）'
-          : '通常相談を送信しました（通常相談券1枚）';
+          ? '【至急・優先導き】至急相談を送信しました（優先券1枚・本日の至急枠を1回使用）'
+          : '【通常】通常相談を送信しました（通常相談券1枚）';
       if (useFirestore) {
         if (mailSentReport == true) {
           _showMailSentFeedback(
@@ -492,7 +539,7 @@ class _ConsultationPageState extends State<ConsultationPage> {
                   itemBuilder: (_, i) {
                     final item = _history[i];
                     final text = item['text'] ?? '';
-                    final urgent = _coerceUrgentFlag(item['urgent']);
+                    final urgent = _isUrgentConsultationRecord(item);
                     final rawCost = item['cost'];
                     final ticketCount = rawCost is int ? rawCost : 1;
                     final status = item['status'] ?? 'pending';
@@ -517,9 +564,51 @@ class _ConsultationPageState extends State<ConsultationPage> {
                       statusText = '回答待ち';
                     }
 
-                    return ExpansionTile(
-                      leading: Icon(urgent ? Icons.priority_high : Icons.chat, color: urgent ? Colors.red : null),
-                      title: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      color: urgent ? Colors.red.shade50.withValues(alpha: 0.35) : Colors.blueGrey.shade50.withValues(alpha: 0.4),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(
+                          color: urgent ? Colors.red.shade400 : Colors.blueGrey.shade400,
+                          width: urgent ? 2 : 1,
+                        ),
+                      ),
+                      child: ExpansionTile(
+                      leading: Icon(urgent ? Icons.priority_high : Icons.chat, color: urgent ? Colors.red.shade800 : Colors.blueGrey.shade700),
+                      title: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8, top: 2),
+                            child: Chip(
+                              avatar: Icon(
+                                urgent ? Icons.flash_on : Icons.chat_bubble_outline,
+                                size: 18,
+                                color: urgent ? Colors.red.shade900 : Colors.blueGrey.shade900,
+                              ),
+                              label: Text(
+                                urgent ? '至急・優先導き' : '通常相談',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                  color: urgent ? Colors.red.shade900 : Colors.blueGrey.shade900,
+                                ),
+                              ),
+                              backgroundColor: urgent ? Colors.red.shade100 : Colors.blueGrey.shade200,
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              text.toString(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                       subtitle: Text(
                         '${urgent ? "至急" : "通常"}（${urgent ? "優先券" : "通常相談券"} $ticketCount枚）- $statusText',
                       ),
@@ -573,6 +662,7 @@ class _ConsultationPageState extends State<ConsultationPage> {
                           ),
                         ],
                       ],
+                    ),
                     );
                   },
                 ),
