@@ -53,7 +53,8 @@ app.post("/api/chat/send", async (req, res) => {
     const { cleanText, embeddedTierRaw } = types.extractEmbeddedConsultationTier(
       message != null ? String(message) : ""
     );
-    const text = cleanText.trim();
+    /** 至急時に ensurePriorityGuidanceBodyPrefix で上書きするため let */
+    let text = cleanText.trim();
     const cid = chatId || "default";
     const headerCt = String(
       req.get("x-auraface-consultation-type") || req.get("X-AuraFace-Consultation-Type") || ""
@@ -193,6 +194,10 @@ app.post("/api/chat/send", async (req, res) => {
       debugResolvedConsultationType,
       debugMailSubject: mailError ? null : mailResult?.subject ?? null,
       debugMailTo: mailError ? null : mailResult?.debugMailTo ?? process.env.ADMIN_EMAIL ?? null,
+      debugMailPartialFailures:
+        mailError || !mailResult?.mailPartialFailures
+          ? null
+          : mailResult.mailPartialFailures,
     });
   } catch (err) {
     console.error("[chat/send] error", err);
