@@ -23,6 +23,8 @@ import 'package:kami_face_oracle/features/consent/widgets/biometric_consent_moda
 import 'package:kami_face_oracle/ui/pages/legal_document_page.dart';
 import 'package:kami_face_oracle/ui/pages/privacy_settings_page.dart';
 import 'package:kami_face_oracle/core/e2e.dart';
+import 'package:kami_face_oracle/services/tutorial_diagnosis_local_store.dart';
+import 'package:kami_face_oracle/ui/pages/personality_diagnosis_result_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -40,6 +42,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   late AnimationController _glowController;
   bool _devReplyUnread = false;
   Timer? _unreadPollTimer;
+  bool _hasCachedTutorialDiagnosis = false;
 
   @override
   void initState() {
@@ -52,6 +55,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     )..repeat();
     _unreadPollTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshDevUnread());
     _refreshDevUnread();
+    _loadCachedDiagnosisFlag();
+  }
+
+  Future<void> _loadCachedDiagnosisFlag() async {
+    final v = await TutorialDiagnosisLocalStore.hasStoredResult();
+    if (mounted) setState(() => _hasCachedTutorialDiagnosis = v);
   }
 
   @override
@@ -66,6 +75,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _refreshDevUnread();
+      _loadCachedDiagnosisFlag();
     }
   }
 
@@ -578,6 +588,32 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       ),
                     ),
                   ),
+                  if (_hasCachedTutorialDiagnosis) ...[
+                    const SizedBox(height: 12),
+                    Semantics(
+                      button: true,
+                      label: '保存された性格診断結果を開く',
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final r = await TutorialDiagnosisLocalStore.loadResult();
+                          if (!context.mounted || r == null) return;
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PersonalityDiagnosisResultPage(diagnosisResult: r),
+                            ),
+                          );
+                          await _loadCachedDiagnosisFlag();
+                        },
+                        icon: const Icon(Icons.psychology_alt),
+                        label: const Text('保存された性格診断を開く'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          side: BorderSide(color: const Color(0xFF8B5CF6).withOpacity(0.6), width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   // テスト用：診断チャート表示ボタン
                   Semantics(

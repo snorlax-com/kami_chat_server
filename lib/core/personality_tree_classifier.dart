@@ -18,6 +18,20 @@ class DiagnosisWarning {
     required this.message,
     this.layer,
   });
+
+  Map<String, dynamic> toJson() => {
+        'type': type,
+        'message': message,
+        'layer': layer,
+      };
+
+  static DiagnosisWarning fromJson(Map<String, dynamic> json) {
+    return DiagnosisWarning(
+      type: json['type'] as String? ?? 'warning',
+      message: json['message'] as String? ?? '',
+      layer: json['layer'] as String?,
+    );
+  }
 }
 
 /// 性格診断結果（樹形図ベース）
@@ -47,6 +61,70 @@ class PersonalityTreeDiagnosisResult {
     this.decisionFlow = const [],
     this.evidence = const {},
   });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'personalityType': personalityType,
+      'personalityTypeName': personalityTypeName,
+      'personalityDescription': personalityDescription,
+      'combinationNumber': combinationNumber,
+      'hasError': hasError,
+      'warnings': warnings.map((w) => w.toJson()).toList(),
+      'layerResults': layerResults,
+      'layerValues': layerValues.map((k, v) => MapEntry(k, v)),
+      'layerReasons': layerReasons,
+      'decisionFlow': decisionFlow,
+      'evidence': evidence,
+    };
+  }
+
+  static PersonalityTreeDiagnosisResult fromJson(Map<String, dynamic> json) {
+    final w = json['warnings'];
+    final warnings = w is List
+        ? w
+            .whereType<Map>()
+            .map((e) => DiagnosisWarning.fromJson(Map<String, dynamic>.from(e)))
+            .toList()
+        : <DiagnosisWarning>[];
+    final lr = json['layerResults'];
+    final layerResults = lr is Map
+        ? lr.map((k, v) => MapEntry(k.toString(), v.toString()))
+        : <String, String>{};
+    final lv = json['layerValues'];
+    final layerValues = <String, double>{};
+    if (lv is Map) {
+      for (final e in lv.entries) {
+        final n = e.value;
+        if (n is num) {
+          layerValues[e.key.toString()] = n.toDouble();
+        }
+      }
+    }
+    final lrs = json['layerReasons'];
+    final layerReasons = lrs is Map
+        ? lrs.map((k, v) => MapEntry(k.toString(), v.toString()))
+        : <String, String>{};
+    final df = json['decisionFlow'];
+    final decisionFlow =
+        df is List ? df.map((e) => e.toString()).toList() : <String>[];
+    final ev = json['evidence'];
+    final evidence =
+        ev is Map ? Map<String, dynamic>.from(ev) : <String, dynamic>{};
+    final cn = json['combinationNumber'];
+    return PersonalityTreeDiagnosisResult(
+      personalityType: (json['personalityType'] as num?)?.toInt() ?? 0,
+      personalityTypeName: json['personalityTypeName'] as String? ?? '',
+      personalityDescription: json['personalityDescription'] as String? ?? '',
+      combinationNumber: cn is num ? cn.toInt() : null,
+      hasError: json['hasError'] as bool? ?? false,
+      warnings: warnings,
+      layerResults: layerResults,
+      layerValues: layerValues,
+      layerReasons: layerReasons,
+      decisionFlow: decisionFlow,
+      evidence: evidence,
+    );
+  }
 }
 
 /// 性格診断分類器（樹形図ベース）

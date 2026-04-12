@@ -191,22 +191,64 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
   try {
     if (consultationType === types.PRIORITY_GUIDANCE && recipients.length > 1) {
       const mailIds = [];
+      /** sendOne が例外なく終わった回数（Resend が id を返さない場合でも成功とみなす） */
+      let deliveredOk = 0;
+      /** @type {{ to: string, message: string }[]} */
+      const failures = [];
+      /** @type {object|null} */
+      let lastOkData = null;
+
       for (let i = 0; i < recipients.length; i++) {
-        const r = await sendOne(recipients[i], i + 1, recipients.length);
-        const id = r.data && typeof r.data === "object" ? r.data.id : null;
-        if (id) mailIds.push(id);
-        result = r;
+        if (i > 0) {
+          await new Promise((resolve) => setTimeout(resolve, 450));
+        }
+        try {
+          const r = await sendOne(recipients[i], i + 1, recipients.length);
+          deliveredOk += 1;
+          const id = r.data && typeof r.data === "object" ? r.data.id : null;
+          if (id) mailIds.push(id);
+          lastOkData = r.data && typeof r.data === "object" ? r.data : lastOkData;
+        } catch (err) {
+          const msg = err && err.message ? err.message : String(err);
+          failures.push({ to: recipients[i], message: msg });
+          console.error("[sendConsultationMail] recipient_send_failed", {
+            consultationType,
+            to: recipients[i],
+            recipientIndex: i + 1,
+            recipientTotal: recipients.length,
+            error: msg,
+          });
+        }
       }
+
+      if (deliveredOk === 0) {
+        const detail =
+          failures.length > 0
+            ? failures.map((f) => `${f.to}: ${f.message}`).join("; ")
+            : "Resend がエラーを返さずに id も得られない応答（要ログ確認）";
+        throw new Error(`至急通知メールが全宛先で失敗しました: ${detail}`);
+      }
+
+      if (failures.length > 0) {
+        console.warn("[sendConsultationMail] partial_mail_success", {
+          consultationType,
+          deliveredOk,
+          mailIdCount: mailIds.length,
+          failedCount: failures.length,
+          failures,
+        });
+      }
+
       return {
-        ...(result.data && typeof result.data === "object" ? result.data : {}),
-        id: mailIds[0] ?? result.data?.id,
-        /** 至急複数宛のとき Resend が返した ID（順は recipients と一致） */
+        ...(lastOkData && typeof lastOkData === "object" ? lastOkData : {}),
+        id: mailIds[0] ?? undefined,
         debugMailIds: mailIds,
         subject,
         fromDisplay: fromName,
         consultationType,
         mailUrgent: true,
         debugMailTo: recipients,
+        ...(failures.length > 0 ? { mailPartialFailures: failures } : {}),
       };
     }
 

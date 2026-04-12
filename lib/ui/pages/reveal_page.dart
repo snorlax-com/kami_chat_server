@@ -274,6 +274,7 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
       } else {
         print('[RevealPage] ⚠️ 詳細情報の取得に失敗');
         _actualGod = widget.god ?? deities.first;
+        if (mounted) setState(() {});
       }
     } else {
       // サーバー結果がない場合は、渡されたgodを使用
@@ -318,11 +319,22 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
     super.dispose();
   }
 
+  Color _parseDeityColor(Deity god) {
+    try {
+      final hex = god.colorHex.trim();
+      if (hex.isEmpty) return const Color(0xFF8B5CF6);
+      final normalized = hex.startsWith('#') ? hex.replaceFirst('#', '0xff') : '0xff$hex';
+      return Color(int.parse(normalized));
+    } catch (_) {
+      return const Color(0xFF8B5CF6);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // 実際に表示する神を決定（サーバー結果から取得した神、または渡された神）
     final god = _actualGod ?? widget.god ?? deities.first;
-    final deityColor = Color(int.parse(god.colorHex.replaceFirst('#', '0xff')));
+    final deityColor = _parseDeityColor(god);
     // チュートリアルモードでは金色の神秘的な背景、通常モードでは神の色
     final bgColor = widget.isTutorial
         ? const Color(0xFFFFD700) // 金色

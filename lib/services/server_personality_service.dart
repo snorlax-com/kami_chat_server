@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' if (dart.library.html) 'package:kami_face_oracle/core/io_stub.dart' as io;
 import 'package:http/http.dart' as http;
@@ -64,7 +65,10 @@ class ServerPersonalityService {
             const Duration(seconds: 30),
             onTimeout: () => throw TimeoutException('サーバーへのリクエストがタイムアウトしました'),
           );
-      final response = await http.Response.fromStream(streamedResponse);
+      final response = await http.Response.fromStream(streamedResponse).timeout(
+        const Duration(seconds: 120),
+        onTimeout: () => throw TimeoutException('サーバーからの応答の受信がタイムアウトしました'),
+      );
       print('[ServerPersonalityService] 応答: status=${response.statusCode} bodyLength=${response.body.length}');
       if (response.statusCode == 200) {
         final jsonData = json.decode(response.body) as Map<String, dynamic>;
@@ -127,8 +131,11 @@ class ServerPersonalityService {
         },
       );
 
-      // レスポンスを読み込み
-      final response = await http.Response.fromStream(streamedResponse);
+      // レスポンスを読み込み（ボディが遅いと無限待ちになり UI が固まるため上限を付ける）
+      final response = await http.Response.fromStream(streamedResponse).timeout(
+        const Duration(seconds: 120),
+        onTimeout: () => throw TimeoutException('サーバーからの応答の受信がタイムアウトしました'),
+      );
 
       if (response.statusCode == 200) {
         print('[ServerPersonalityService] ✅ サーバーからの応答を受信');

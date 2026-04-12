@@ -4,14 +4,14 @@ import 'package:kami_face_oracle/models/personality_type_detail.dart';
 
 /// 性格タイプの詳細情報を読み込むサービス
 class PersonalityTypeDetailService {
-  static PersonalityTypeDetail? _cachedDetail;
-  static int? _cachedTypeId;
+  /// タイプIDごとにキャッシュ（単一スロットだと並行 getDetail で取り違えやすい）
+  static final Map<int, PersonalityTypeDetail> _cache = {};
 
   /// 性格タイプの詳細情報を取得
   static Future<PersonalityTypeDetail?> getDetail(int typeId) async {
-    // キャッシュをチェック
-    if (_cachedDetail != null && _cachedTypeId == typeId) {
-      return _cachedDetail;
+    final hit = _cache[typeId];
+    if (hit != null) {
+      return hit;
     }
 
     try {
@@ -64,9 +64,7 @@ class PersonalityTypeDetailService {
         }
       }
 
-      // キャッシュに保存
-      _cachedDetail = detail;
-      _cachedTypeId = typeId;
+      _cache[typeId] = detail;
 
       return detail;
     } catch (e) {
@@ -77,7 +75,6 @@ class PersonalityTypeDetailService {
 
   /// キャッシュをクリア
   static void clearCache() {
-    _cachedDetail = null;
-    _cachedTypeId = null;
+    _cache.clear();
   }
 }

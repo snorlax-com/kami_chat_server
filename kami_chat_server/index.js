@@ -5,6 +5,9 @@ const sendConsultationMail = require("./mail/sendConsultationMail");
 const types = require("./constants/consultationTypes");
 const urgentReception = require("./config/urgentReception");
 const { verifyToken } = require("./token");
+const identityRoutes = require("./identityRoutes");
+const idb = require("./identityDb");
+const { tryInitFirebaseAdmin } = require("./firebaseVerify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,7 +45,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, identityApi: true });
 });
 
 // --- POST /api/chat/send（保存 + Resend で開発者Gmail。メール失敗時も 200 + mailSent:false）
@@ -167,6 +170,20 @@ app.post("/api/chat/send", async (req, res) => {
         consultationType,
         stack: err.stack,
       });
+    }
+
+    const bridgeUserId = String((body || {}).userId || "").trim();
+    if (bridgeUserId && cid) {
+      try {
+        idb.upsertChatThread({
+          chatId: cid,
+          userId: bridgeUserId,
+          consultationType,
+          now: new Date().toISOString(),
+        });
+      } catch (threadErr) {
+        console.error("[chat/send] thread_index_failed", threadErr);
+      }
     }
 
     // メールまで成功した場合は status: "ok"（E2E 期待値と一致）
@@ -393,7 +410,11 @@ function logMailEnvWarning() {
   }
 }
 
+// 診断・guest セッション・claim（identityRoutes）。/api/chat/* より後にマウントしても未一致は next で届く。
+app.use("/api", identityRoutes);
+
 app.listen(PORT, () => {
+  tryInitFirebaseAdmin();
   console.log(`Kami chat server listening on port ${PORT}`);
   logMailEnvWarning();
   console.log("[config] consultation urgent (priority_guidance):", urgentReception.policySummaryForLog());

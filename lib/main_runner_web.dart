@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:kami_face_oracle/app_widgets.dart';
 import 'package:kami_face_oracle/feature/web_shutter/web_shutter_camera_view.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
+import 'package:kami_face_oracle/services/guest_session_service.dart';
 import 'package:kami_face_oracle/services/remote_config_service.dart';
 import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/core/personality_mapping_table.dart';
@@ -12,6 +13,7 @@ Future<void> runAppAsync() async {
   WidgetsFlutterBinding.ensureInitialized();
   registerWebShutterViewFactory();
   await CloudService.init();
+  await GuestSessionService.ensureGuestSessionId();
   await RemoteConfigService.instance.init();
   await BackgroundMusicService().initialize();
   await PersonalityMappingTable.initialize();

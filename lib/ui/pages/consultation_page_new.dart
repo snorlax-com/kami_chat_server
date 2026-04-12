@@ -13,6 +13,7 @@ import 'package:kami_face_oracle/services/consultation_mail_new_send.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
 import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
+import 'package:kami_face_oracle/services/consultation_identity.dart';
 
 class ConsultationPageNew extends StatefulWidget {
   final Map<String, dynamic>? diagnosis; // 診断結果（オプション）
@@ -127,12 +128,9 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
 
     setState(() => _isLoading = true);
 
-    // ユーザーIDを取得（簡易実装、実際は認証から取得）
     final prefs = await SharedPreferences.getInstance();
-    String userId = prefs.getString('user_id') ?? 'user_${DateTime.now().millisecondsSinceEpoch}';
-    if (!prefs.containsKey('user_id')) {
-      await prefs.setString('user_id', userId);
-    }
+    final userId = fbUser.uid;
+    await prefs.setString('user_id', userId);
 
     // 診断結果を取得（渡されていない場合は空の辞書）
     final diagnosis = widget.diagnosis ?? {};

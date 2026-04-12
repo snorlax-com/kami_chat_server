@@ -41,6 +41,18 @@ import 'package:kami_face_oracle/utils/temp_file_helper.dart';
 import 'package:kami_face_oracle/utils/diagnosis_error_message.dart';
 import 'package:hive/hive.dart';
 
+/// Android でカメラプラグイン等が保存するアプリ専用領域。`/storage/emulated/.../Android/data/<pkg>/` を
+/// 「外部ストレージ」と誤判定すると不要なコピー探索で失敗しうるため除外する。
+bool _isAppScopedAndroidPath(String imagePath) {
+  if (imagePath.isEmpty) return false;
+  final p = imagePath.replaceAll('\\', '/');
+  const pkg = 'com.auraface.kami_face_oracle';
+  if (p.contains('/Android/data/$pkg/')) return true;
+  if (p.startsWith('/data/data/$pkg/')) return true;
+  if (p.contains('/data/user/') && p.contains('/$pkg/')) return true;
+  return false;
+}
+
 class CapturePage extends StatefulWidget {
   final String? initialImagePath;
   final bool autoMode;
@@ -815,7 +827,7 @@ class _CapturePageState extends State<CapturePage> with WidgetsBindingObserver {
         setState(() => _busy = false);
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && _busy) setState(() => _busy = false);
     }
   }
 
@@ -953,9 +965,10 @@ class _CapturePageState extends State<CapturePage> with WidgetsBindingObserver {
       // カメラで撮影したファイル（通常は/data/data/.../cache/...）は直接処理
       // 外部ストレージのパスかどうかを確認
       // アプリの内部ストレージや外部ストレージのアプリ専用ディレクトリも確認
-      final isExternalStorage = imagePath.startsWith('/sdcard/') ||
-          imagePath.startsWith('/storage/emulated/') ||
-          imagePath.startsWith('/storage/self/primary/');
+      final isExternalStorage = (imagePath.startsWith('/sdcard/') ||
+              imagePath.startsWith('/storage/emulated/') ||
+              imagePath.startsWith('/storage/self/primary/')) &&
+          !_isAppScopedAndroidPath(imagePath);
 
       print('[CapturePage] パス判定: isExternalStorage=$isExternalStorage, path=$imagePath');
 

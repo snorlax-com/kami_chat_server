@@ -9,9 +9,15 @@ import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 
 class CloudService {
   static bool _initialized = false;
-  static bool _available = false; // ランタイムで失敗したらfalse
+  /// `Firebase.initializeApp()` まで成功（google-services 設定済みなど）
+  static bool _appReady = false;
+  /// 匿名ログインまで成功（Firestore・日次記録などフル利用）
+  static bool _available = false;
 
-  /// Firebase が利用可能か（相談送信・履歴取得に必要）
+  /// Firebase Core が起動済みか（Google / メール等のログイン UI を出せる）
+  static bool get isFirebaseAppReady => _appReady;
+
+  /// Firebase がフル利用可能か（匿名セッションあり。相談の Firestore 同期など）
   static bool get isAvailable => _available;
 
   static Future<void> init() async {
@@ -19,13 +25,24 @@ class CloudService {
     _initialized = true;
     try {
       await Firebase.initializeApp();
-      await FirebaseAuth.instance.signInAnonymously();
-      _available = true;
-      debugPrint('[CloudService] Firebase initialized successfully');
+      _appReady = true;
+      debugPrint('[CloudService] Firebase.initializeApp OK');
+      try {
+        await FirebaseAuth.instance.signInAnonymously();
+        _available = true;
+        debugPrint('[CloudService] Anonymous sign-in OK');
+      } catch (e) {
+        _available = false;
+        debugPrint(
+          '[CloudService] Anonymous sign-in failed (Firestore はオフの可能性): $e\n'
+          'コンソールで Authentication → 匿名を有効化してください。'
+          ' Google ログイン用シートはこの状態でも表示できます。',
+        );
+      }
     } catch (e) {
-      _available = false; // Firebase未設定でもアプリは継続
+      _appReady = false;
+      _available = false;
       debugPrint('[CloudService] Firebase initialization failed: $e');
-      // Firebaseが使えない場合はローカルストレージを使用
     }
   }
 
@@ -311,7 +328,7 @@ class CloudService {
           .limit(limit)
           .get();
       return snap.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data();
         return {'id': doc.id, ...data};
       }).toList();
     } catch (_) {
@@ -338,7 +355,7 @@ class CloudService {
           .snapshots()
           .map((snapshot) {
         return snapshot.docs.map((doc) {
-          final data = doc.data() as Map<String, dynamic>;
+          final data = doc.data();
           return {'id': doc.id, ...data};
         }).toList();
       });

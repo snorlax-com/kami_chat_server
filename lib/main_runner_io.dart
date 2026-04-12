@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:kami_face_oracle/app_widgets.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
+import 'package:kami_face_oracle/services/guest_session_service.dart';
 import 'package:kami_face_oracle/services/remote_config_service.dart';
 import 'package:kami_face_oracle/services/iap_service.dart';
 import 'package:kami_face_oracle/services/background_music_service.dart';
@@ -45,6 +46,7 @@ Future<String?> _resolveAutoInputPathForAutoMode() async {
 Future<void> runAppAsync() async {
   WidgetsFlutterBinding.ensureInitialized();
   await CloudService.init();
+  await GuestSessionService.ensureGuestSessionId();
   await RemoteConfigService.instance.init();
   await IAPService.instance.init();
   await BackgroundMusicService().initialize();

@@ -11,6 +11,7 @@ import 'package:kami_face_oracle/services/consultation_mail_new_send.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
 import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
+import 'package:kami_face_oracle/services/consultation_identity.dart';
 
 /// Firestore 等で bool が混在しても履歴の「至急」表示を安定させる
 bool _coerceUrgentFlag(dynamic v) {
@@ -193,6 +194,9 @@ class _ConsultationPageState extends State<ConsultationPage> {
   Future<void> _send({required bool urgent}) async {
     if (_controller.text.trim().isEmpty) return;
 
+    final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
+    if (fbUser == null) return;
+
     final useFirestore = CloudService.isAvailable;
 
     if (urgent) {
@@ -237,8 +241,8 @@ class _ConsultationPageState extends State<ConsultationPage> {
 
     // 相談ボタンを押したら必ず開発者へGmail通知（メールブリッジ）
     final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString('user_id') ?? 'user_${DateTime.now().millisecondsSinceEpoch}';
-    if (!prefs.containsKey('user_id')) await prefs.setString('user_id', userId);
+    final userId = fbUser.uid;
+    await prefs.setString('user_id', userId);
     final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
     final bridgeUrl = AuraFaceChatMailService.consultationSendBaseUrl(savedUrl);
     debugPrint('[Consultation] mail bridge savedPref=$savedUrl actualBridgeUrl=$bridgeUrl');

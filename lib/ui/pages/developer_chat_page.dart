@@ -6,6 +6,7 @@ import 'package:kami_face_oracle/services/currency_service.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
+import 'package:kami_face_oracle/services/consultation_identity.dart';
 
 /// メールブリッジ（kami_chat_server）上のスレッドで、開発者返信の確認・追記。
 class DeveloperChatPage extends StatefulWidget {
@@ -76,8 +77,8 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
 
   Future<void> _bootstrap() async {
     final prefs = await SharedPreferences.getInstance();
-    _userId = prefs.getString('user_id') ?? 'user_${DateTime.now().millisecondsSinceEpoch}';
-    if (!prefs.containsKey('user_id')) await prefs.setString('user_id', _userId);
+    _userId = await ConsultationIdentity.bridgeUserIdOrLegacy();
+    await prefs.setString('user_id', _userId);
     final saved = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
     _bridgeBaseUrl = AuraFaceChatMailService.consultationSendBaseUrl(saved);
     _chatId = await DeveloperChatPref.getActiveChatId();
@@ -149,6 +150,9 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
     final text = _input.text.trim();
     if (text.isEmpty || _chatId == null || _loading) return;
 
+    final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
+    if (fbUser == null) return;
+
     final needsPay = _requiresCoinForNextSend;
     if (needsPay) {
       final w = await CurrencyService.load();
@@ -193,7 +197,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
 
       final mailConsultationType = await _followUpConsultationTypeFor(_messages);
       final res = await _service.send(
-        userId: _userId,
+        userId: fbUser.uid,
         chatId: _chatId!,
         message: text,
         sendSource: ConsultationSendSource.developerChatFollowUp,

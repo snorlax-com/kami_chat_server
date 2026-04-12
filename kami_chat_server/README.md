@@ -61,6 +61,16 @@ cp .env.example .env   # なければ .env を手作り
 node index.js
 ```
 
+ゲスト診断 API の自動検証（空きポートで子プロセス起動）:
+
+```bash
+npm run test:identity-api
+# ユニット + 上記をまとめて
+npm run test:all
+```
+
+手動で `curl` する場合、**ポートが他アプリに占有されていると 404 HTML** になることがあるため、未使用の `PORT`（例: 30990）を指定してください。
+
 ## テスト
 
 ```bash
@@ -72,3 +82,21 @@ node scripts/send-receive-send-test.js http://127.0.0.1:3000
 ```bash
 npm run test:consultation-mail
 ```
+
+## ゲストセッション・チュートリアル診断 API（同一プロセス）
+
+`better-sqlite3` で `data/identity.sqlite`（`IDENTITY_DB_DIR` で変更可）に保存します。
+
+| メソッド | パス | 説明 |
+|----------|------|------|
+| POST | `/api/auth/guest-session` | `guestSessionId` を発行 |
+| POST | `/api/diagnosis/tutorial` | ゲストに紐づけ仮保存（`detailJson` はレスポンスに含めない） |
+| POST | `/api/auth/claim-guest-data` | `Authorization: Bearer <Firebase ID トークン>` + body `guestSessionId` で診断をユーザーに移管・`is_unlocked=1` |
+| GET | `/api/diagnosis/me` | 認証必須。最新の開示済み診断（`detailJson`） |
+| GET | `/api/chat/threads/me` | 認証必須。`POST /api/chat/send` で記録した `chat_threads` 一覧 |
+
+**本番**: Render に `FIREBASE_SERVICE_ACCOUNT_JSON`（Firebase サービスアカウントの JSON 文字列）を設定してください。未設定のとき `claim` / `me` は本番で 401/503 になります。
+
+**ローカル**: `.env` に `IDENTITY_DEV_SECRET` と `IDENTITY_DEV_UID` を入れ、`POST /api/auth/claim-guest-data` にヘッダ `x-identity-dev-secret` を付けると Bearer なしで検証をバイパスできます（`NODE_ENV=production` では無効）。
+
+`POST /api/chat/send` 成功時、`body.userId` と `chatId` があれば `chat_threads` テーブルに upsert され、後続の相談返信 UI と `user_id` で突き合わせ可能です。

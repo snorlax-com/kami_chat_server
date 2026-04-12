@@ -185,6 +185,12 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      // 撮影直後〜サーバー診断完了まで inactive になり得る。ここでカメラを捨てると
+      // build が「未初期化」分支になり真っ白な Scaffold だけが表示され、戻るも効かないように見える。
+      if (!kIsWeb && _capturing) {
+        debugPrint('[TUTORIAL_CAM] lifecycle $state during capture/processing — keep camera');
+        return;
+      }
       if (kIsWeb && _webSimpleController != null) {
         _webSimpleController!.stop();
         if (mounted) setState(() {});
@@ -911,11 +917,11 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
       } else {
         await _onCaptured(xFile.path);
       }
-      await _startStream();
+      if (mounted) await _startStream();
     } catch (e) {
       debugPrint('[AUTO_SHOT] capture failed: $e');
       _guidanceSub = '撮影に失敗しました。もう一度お試しください';
-      await _startStream();
+      if (mounted) await _startStream();
     } finally {
       _capturing = false;
       if (mounted) setState(() {});
@@ -1771,10 +1777,41 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
       // Web: 自動シャッター復元 — MediaPipe Face Landmarker 経路（shutter_engine.js）を優先
       if (kIsWeb) return _buildWebShutterBody();
       return Scaffold(
+        backgroundColor: const Color(0xFF0A0E1A),
         appBar: AppBar(
+          backgroundColor: const Color(0xFF1A1F3A),
           title: Text(widget.currentStep == 'neutral' ? '真顔の写真を撮影' : '笑顔の写真を撮影'),
         ),
-        body: const Center(child: CircularProgressIndicator()),
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFF1A1030), Color(0xFF0A0E1A)],
+            ),
+          ),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+                const SizedBox(height: 24),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Text(
+                    _capturing
+                        ? '写真を送って性格診断しています。\n数十秒かかることがあります。'
+                        : 'カメラを準備しています…',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70, fontSize: 15, height: 1.45),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
@@ -1867,6 +1904,33 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
                         'pitch=${_poseGate.pitchDeg.toStringAsFixed(1)}° roll=${_poseGate.rollDeg.toStringAsFixed(1)}°\n'
                         'preview=${previewSize.width.toStringAsFixed(0)}x${previewSize.height.toStringAsFixed(0)} imageSize=${imageSize.width.toStringAsFixed(0)}x${imageSize.height.toStringAsFixed(0)}',
                         style: const TextStyle(color: Colors.white, fontSize: 11),
+                      ),
+                    ),
+                  ),
+
+                // 撮影〜診断中はプレビューが止まって真っ白に見える端末対策
+                if (_capturing)
+                  Positioned.fill(
+                    child: Material(
+                      color: Colors.black.withValues(alpha: 0.82),
+                      child: const SafeArea(
+                        child: Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+                              SizedBox(height: 24),
+                              Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 28),
+                                child: Text(
+                                  '写真を送って性格診断しています。\nしばらくお待ちください。',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: Colors.white, fontSize: 16, height: 1.45),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),

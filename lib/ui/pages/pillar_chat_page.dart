@@ -6,6 +6,7 @@ import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
+import 'package:kami_face_oracle/services/consultation_identity.dart';
 
 /// 柱とのチャットページ
 class PillarChatPage extends StatefulWidget {
@@ -49,6 +50,7 @@ class _PillarChatPageState extends State<PillarChatPage> {
     try {
       final detail = await PersonalityTypeDetailService.getDetail(widget.personalityType);
       if (detail != null) {
+        if (!mounted) return;
         setState(() {
           _detail = detail;
           _characterImagePath = detail.characterImage.isNotEmpty
@@ -78,6 +80,7 @@ class _PillarChatPageState extends State<PillarChatPage> {
           timestamp: DateTime.now(),
         ));
 
+        if (!mounted) return;
         setState(() {
           _messages = historyMessages;
           _isLoading = false;
@@ -85,6 +88,7 @@ class _PillarChatPageState extends State<PillarChatPage> {
 
         // スクロールを最下部に
         WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
           if (_scrollController.hasClients) {
             _scrollController.animateTo(
               _scrollController.position.maxScrollExtent,
@@ -94,12 +98,14 @@ class _PillarChatPageState extends State<PillarChatPage> {
           }
         });
       } else {
+        if (!mounted) return;
         setState(() {
           _isLoading = false;
         });
       }
     } catch (e) {
       print('[PillarChatPage] エラー: $e');
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -109,6 +115,9 @@ class _PillarChatPageState extends State<PillarChatPage> {
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty || _sendingToDeveloper) return;
+
+    final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
+    if (fbUser == null) return;
 
     setState(() {
       _messages.add(ChatMessage(
@@ -133,10 +142,8 @@ class _PillarChatPageState extends State<PillarChatPage> {
     setState(() => _sendingToDeveloper = true);
     try {
       final prefs = await SharedPreferences.getInstance();
-      var userId = prefs.getString('user_id') ?? 'user_${DateTime.now().millisecondsSinceEpoch}';
-      if (!prefs.containsKey('user_id')) {
-        await prefs.setString('user_id', userId);
-      }
+      final userId = fbUser.uid;
+      await prefs.setString('user_id', userId);
       final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
       final bridgeUrl = AuraFaceChatMailService.consultationSendBaseUrl(savedUrl);
       final mailService = AuraFaceChatMailService(baseUrl: bridgeUrl);
@@ -206,11 +213,25 @@ class _PillarChatPageState extends State<PillarChatPage> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
+        backgroundColor: const Color(0xFF0A0E1A),
         appBar: AppBar(
+          backgroundColor: const Color(0xFF1A1F3A),
           title: const Text('柱とのチャット'),
         ),
-        body: const Center(
-          child: CircularProgressIndicator(),
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFF1A1030),
+                Color(0xFF0A0E1A),
+              ],
+            ),
+          ),
+          child: const Center(
+            child: CircularProgressIndicator(color: Color(0xFF8B5CF6)),
+          ),
         ),
       );
     }

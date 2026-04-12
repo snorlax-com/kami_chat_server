@@ -11,6 +11,9 @@ import 'package:kami_face_oracle/config/mail_bridge_config.dart';
 /// Render 無料枠の初回遅延を考慮したタイムアウト（秒）
 const int _kTimeoutSeconds = 60;
 
+/// 至急はサーバーが Resend を複数回呼ぶため長めに取る（冷え起動＋2通送信）
+const int _kTimeoutSecondsUrgentPost = 120;
+
 class AuraFaceChatMailService {
   /// 本文末尾に付与。`consultationType` / `urgent` が欠落しても `message` だけ届く経路向け（サーバーで除去）。
   static final RegExp _embeddedTierSuffix = RegExp(
@@ -79,12 +82,28 @@ class AuraFaceChatMailService {
     return u.endsWith('/') ? u.substring(0, u.length - 1) : u;
   }
 
+  /// 実機では届かないが、エミュレータ／PC 検証で保存されがちな接続先。
+  static bool _savedBridgeUrlIsLoopback(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return false;
+    try {
+      final uri = Uri.parse(t.contains('://') ? t : 'http://$t');
+      final h = uri.host.toLowerCase();
+      return h == 'localhost' || h == '127.0.0.1' || h == '::1';
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 占い相談の Gmail 通知先。
   /// リリースでは [productionBaseUrl]（`kMailBridgeProductionUrl` 等）を常に使い、
   /// 開発用に保存した古いブリッジ URL へ送って「至急が通常メール」になるのを防ぐ。
   ///
   /// **プロファイルビルド**（`flutter run --profile` 等）では [kDebugMode] が false のため、
   /// 本番 URL があれば保存済み `mail_bridge_base_url`（検証用の古いサーバー）より本番を優先する。
+  ///
+  /// **デバッグ**で `mail_bridge_base_url` に `127.0.0.1` / `localhost` が残っていると実機では常に失敗するため、
+  /// 本番 URL が定義されていればその保存値は無視して本番へ送る。
   static String consultationSendBaseUrl(String? savedPrefUrl) {
     final prod = productionBaseUrl;
     final prodNorm =
@@ -98,7 +117,13 @@ class AuraFaceChatMailService {
       return effectiveDefaultBaseUrl;
     }
     final s = savedPrefUrl?.trim() ?? '';
-    if (s.isNotEmpty) return _normalizeBaseUrl(s);
+    if (s.isNotEmpty) {
+      final norm = _normalizeBaseUrl(s);
+      if (prodNorm != null && _savedBridgeUrlIsLoopback(norm)) {
+        return prodNorm;
+      }
+      return norm;
+    }
     return effectiveDefaultBaseUrl;
   }
 
@@ -290,14 +315,16 @@ class AuraFaceChatMailService {
     _logSendLine('wire_message_final=$payloadMessage');
 
     try {
-      _log('[MailBridge] POST $uri body=$bodyStr');
+      final postTimeoutSeconds =
+          urgent ? _kTimeoutSecondsUrgentPost : _kTimeoutSeconds;
+      _log('[MailBridge] POST $uri body=$bodyStr timeoutSec=$postTimeoutSeconds');
       final res = await http
           .post(
             uri,
             headers: headerMap,
             body: bodyStr,
           )
-          .timeout(const Duration(seconds: _kTimeoutSeconds));
+          .timeout(Duration(seconds: postTimeoutSeconds));
 
       Map<String, dynamic>? body;
       try {
@@ -379,6 +406,7 @@ class AuraFaceChatMailService {
       'debugResolvedConsultationType',
       'debugMailSubject',
       'debugMailTo',
+      'debugMailPartialFailures',
     ];
     final out = <String, dynamic>{};
     for (final k in keys) {

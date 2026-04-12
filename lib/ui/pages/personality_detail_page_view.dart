@@ -61,6 +61,7 @@ class _PersonalityDetailPageViewState extends State<PersonalityDetailPageView> {
           print('    - ${entry.key}: ${entry.value.title} (${entry.value.content.length}文字)');
         }
       }
+      if (!mounted) return;
       setState(() {
         _detail = detail;
         _isLoading = false;
@@ -69,13 +70,14 @@ class _PersonalityDetailPageViewState extends State<PersonalityDetailPageView> {
       if (detail != null) {
         print('[PersonalityDetailPageView] 詳細を読み込み完了: pillarId=${detail.pillarId}');
         _currentPillarId = detail.pillarId;
-        _initBackgroundMusic();
+        await _initBackgroundMusic();
       } else {
         print('[PersonalityDetailPageView] ⚠️ 詳細の読み込みに失敗しました');
       }
     } catch (e, stackTrace) {
       print('[PersonalityDetailPageView] ❌ エラー: $e');
       print('[PersonalityDetailPageView] スタックトレース: ${stackTrace.toString().split("\n").take(5).join("\n")}');
+      if (!mounted) return;
       setState(() {
         _detail = null;
         _isLoading = false;
