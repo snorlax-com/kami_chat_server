@@ -7,7 +7,11 @@ const urgentReception = require("./config/urgentReception");
 const { verifyToken } = require("./token");
 const identityRoutes = require("./identityRoutes");
 const idb = require("./identityDb");
-const { tryInitFirebaseAdmin, isFirebaseConfigured } = require("./firebaseVerify");
+const {
+  tryInitFirebaseAdmin,
+  isFirebaseConfigured,
+  getFirebaseHealthSnapshot,
+} = require("./firebaseVerify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,11 +49,13 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  tryInitFirebaseAdmin();
+  const fb = getFirebaseHealthSnapshot();
   res.json({
     ok: true,
     identityApi: true,
-    firebaseAdmin: isFirebaseConfigured(),
+    firebaseAdmin: fb.firebaseAdmin,
+    firebaseCredentialEnv: fb.firebaseCredentialEnv,
+    firebaseInitFailureCode: fb.firebaseInitFailureCode,
   });
 });
 

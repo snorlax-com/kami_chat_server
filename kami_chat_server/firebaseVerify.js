@@ -18,9 +18,25 @@ const path = require("path");
 let admin;
 let firebaseReady = false;
 
+/** @type {null | 'NO_CREDENTIAL_ENV' | 'JSON_PARSE' | 'B64_DECODE' | 'ADMIN_INIT'} */
+let firebaseInitFailureCode = null;
+
 function readCredentialsFile(p) {
   const abs = path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
   return fs.readFileSync(abs, "utf8");
+}
+
+/**
+ * Render 貼り付けで混入しやすい空白・改行を除去し、base64url を標準 Base64 に寄せる。
+ * @param {string} raw
+ */
+function sanitizeBase64Input(raw) {
+  let s = String(raw).replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4;
+  if (pad === 2) s += "==";
+  else if (pad === 3) s += "=";
+  else if (pad === 1) return null;
+  return s;
 }
 
 /**
@@ -29,13 +45,22 @@ function readCredentialsFile(p) {
 function loadServiceAccountJsonString() {
   const inline = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (inline != null && String(inline).trim() !== "") {
-    return String(inline).trim();
+    let t = String(inline).trim();
+    if (t.charCodeAt(0) === 0xfeff) t = t.slice(1);
+    return t;
   }
   const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_JSON_B64;
   if (b64 != null && String(b64).trim() !== "") {
     try {
-      return Buffer.from(String(b64).trim(), "base64").toString("utf8");
+      const clean = sanitizeBase64Input(b64);
+      if (!clean) {
+        firebaseInitFailureCode = "B64_DECODE";
+        console.error("[firebaseVerify] FIREBASE_SERVICE_ACCOUNT_JSON_B64 invalid length/padding");
+        return null;
+      }
+      return Buffer.from(clean, "base64").toString("utf8");
     } catch (e) {
+      firebaseInitFailureCode = "B64_DECODE";
       console.error("[firebaseVerify] FIREBASE_SERVICE_ACCOUNT_JSON_B64 decode failed", e.message);
       return null;
     }
@@ -61,19 +86,38 @@ function loadServiceAccountJsonString() {
   return null;
 }
 
+function stripBomUtf8(s) {
+  let t = String(s);
+  if (t.charCodeAt(0) === 0xfeff) t = t.slice(1);
+  return t;
+}
+
 function tryInitFirebaseAdmin() {
   if (firebaseReady) return;
   const jsonStr = loadServiceAccountJsonString();
-  if (!jsonStr) return;
+  if (!jsonStr) {
+    if (!firebaseInitFailureCode) firebaseInitFailureCode = "NO_CREDENTIAL_ENV";
+    return;
+  }
+  const forParse = stripBomUtf8(jsonStr);
   try {
     admin = require("firebase-admin");
-    const cred = JSON.parse(jsonStr);
+    let cred;
+    try {
+      cred = JSON.parse(forParse);
+    } catch (e) {
+      firebaseInitFailureCode = "JSON_PARSE";
+      console.error("[firebaseVerify] service account JSON parse failed", e.message);
+      return;
+    }
     if (!admin.apps.length) {
       admin.initializeApp({ credential: admin.credential.cert(cred) });
     }
     firebaseReady = true;
+    firebaseInitFailureCode = null;
     console.log("[firebaseVerify] firebase-admin initialized");
   } catch (e) {
+    firebaseInitFailureCode = "ADMIN_INIT";
     console.error("[firebaseVerify] init failed", e.message);
   }
 }
@@ -129,9 +173,33 @@ async function resolveUserFromRequest(req) {
   }
 }
 
+/**
+ * 秘密を返さず、どの環境変数が「空でないか」と初期化失敗コードだけ返す（/health 用）。
+ */
+function getFirebaseHealthSnapshot() {
+  const hasJson = !!(
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON && String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON).trim()
+  );
+  const hasB64 = !!(
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON_B64 &&
+    String(process.env.FIREBASE_SERVICE_ACCOUNT_JSON_B64).trim()
+  );
+  const hasPath = !!(
+    process.env.FIREBASE_SERVICE_ACCOUNT_PATH && String(process.env.FIREBASE_SERVICE_ACCOUNT_PATH).trim()
+  );
+  const hasGac = !!(process.env.GOOGLE_APPLICATION_CREDENTIALS && String(process.env.GOOGLE_APPLICATION_CREDENTIALS).trim());
+  tryInitFirebaseAdmin();
+  return {
+    firebaseAdmin: firebaseReady,
+    firebaseCredentialEnv: { json: hasJson, b64: hasB64, path: hasPath, gac: hasGac },
+    firebaseInitFailureCode: firebaseReady ? null : firebaseInitFailureCode,
+  };
+}
+
 module.exports = {
   verifyBearerToken,
   resolveUserFromRequest,
   isFirebaseConfigured,
   tryInitFirebaseAdmin: tryInitFirebaseAdmin,
+  getFirebaseHealthSnapshot,
 };
