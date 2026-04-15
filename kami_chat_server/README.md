@@ -6,7 +6,7 @@
 
 **対処（どちらか）**
 
-1. Render ダッシュボード → 該当 Web Service → **Settings** → **Root Directory** を **`kami_chat_server`** にして **Manual Deploy**  
+1. Render ダッシュボード → 該当 Web Service → **Settings** → **Root Directory** を **`kami_chat_server`** にして **Manual Deploy**
 2. リポジトリルートの **`render.yaml`**（`rootDir: kami_chat_server`）を Blueprint として同期
 
 ---
@@ -95,7 +95,13 @@ npm run test:consultation-mail
 | GET | `/api/diagnosis/me` | 認証必須。最新の開示済み診断（`detailJson`） |
 | GET | `/api/chat/threads/me` | 認証必須。`POST /api/chat/send` で記録した `chat_threads` 一覧 |
 
-**本番**: Render に `FIREBASE_SERVICE_ACCOUNT_JSON`（Firebase サービスアカウントの JSON 文字列）を設定してください。未設定のとき `claim` / `me` は本番で 401/503 になります。
+**本番（Firebase Admin）**: [Firebase Console](https://console.firebase.google.com/) → プロジェクト設定 → **サービスアカウント** → **新しい秘密鍵の生成** で JSON を取得し、サーバーに渡してください。
+
+- **`FIREBASE_SERVICE_ACCOUNT_JSON`** … JSON 文字列をそのまま（1行に minify すると扱いやすい）
+- **`FIREBASE_SERVICE_ACCOUNT_JSON_B64`** … 上記 UTF-8 を Base64 した値（Render の「1行シークレット」向け）
+- **`FIREBASE_SERVICE_ACCOUNT_PATH`** または **`GOOGLE_APPLICATION_CREDENTIALS`** … マシン上の JSON ファイルパス（主にローカル）
+
+未設定のとき本番では `claim` / `me` 等が **401 / 503** になります。疎通は `GET /health` の `firebaseAdmin: true` で確認できます。
 
 **ローカル**: `.env` に `IDENTITY_DEV_SECRET` と `IDENTITY_DEV_UID` を入れ、`POST /api/auth/claim-guest-data` にヘッダ `x-identity-dev-secret` を付けると Bearer なしで検証をバイパスできます（`NODE_ENV=production` では無効）。
 

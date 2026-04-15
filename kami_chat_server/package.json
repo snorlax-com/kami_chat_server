@@ -14,7 +14,8 @@
     "test:local-all": "bash scripts/run-local-e2e.sh",
     "test:consultation-mail": "node --test test/*.test.js",
     "test:identity-api": "node scripts/identity-api-e2e.js",
-    "test:all": "node --test test/*.test.js && node scripts/identity-api-e2e.js"
+    "test:all": "node --test test/*.test.js && node scripts/identity-api-e2e.js",
+    "firebase:b64": "node scripts/firebase-service-account-to-b64.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

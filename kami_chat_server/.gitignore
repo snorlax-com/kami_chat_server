@@ -1,3 +1,6 @@
 node_modules
 .env
 .DS_Store
+# Firebase サービスアカウント（ローカルは FIREBASE_SERVICE_ACCOUNT_PATH で参照）
+secrets/*.json
+secrets/render-*.txt

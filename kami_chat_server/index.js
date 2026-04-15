@@ -7,7 +7,7 @@ const urgentReception = require("./config/urgentReception");
 const { verifyToken } = require("./token");
 const identityRoutes = require("./identityRoutes");
 const idb = require("./identityDb");
-const { tryInitFirebaseAdmin } = require("./firebaseVerify");
+const { tryInitFirebaseAdmin, isFirebaseConfigured } = require("./firebaseVerify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,7 +45,12 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true, identityApi: true });
+  tryInitFirebaseAdmin();
+  res.json({
+    ok: true,
+    identityApi: true,
+    firebaseAdmin: isFirebaseConfigured(),
+  });
 });
 
 // --- POST /api/chat/send（保存 + Resend で開発者Gmail。メール失敗時も 200 + mailSent:false）
@@ -308,16 +313,15 @@ app.get("/admin/reply", (req, res) => {
       </head>
       <body>
         <h2>チャット履歴</h2>
-        ${
-          isPriority
-            ? `<div class="priority-banner"><strong>【優先導き】</strong> 2時間以内対応の対象スレッドです。consultationType: <code>${escapeHtml(
-                effectiveConsultationType
-              )}</code></div>`
-            : ""
-        }
+        ${isPriority
+        ? `<div class="priority-banner"><strong>【優先導き】</strong> 2時間以内対応の対象スレッドです。consultationType: <code>${escapeHtml(
+          effectiveConsultationType
+        )}</code></div>`
+        : ""
+      }
         <p class="meta">chatId: ${escapeHtml(chatId)} / consultationType: ${escapeHtml(
-      effectiveConsultationType
-    )}</p>
+        effectiveConsultationType
+      )}</p>
     `;
 
     for (const r of sorted) {
@@ -405,7 +409,7 @@ function logMailEnvWarning() {
   if (!adminEmail || !resendKey || String(resendKey).trim() === "" || !mailFrom || !baseUrl) {
     console.warn(
       "[警告] Gmail通知に必要な環境変数が未設定です。POST /api/chat/send は成功しますが mailSent=false になります。\n" +
-        "        Render に設定: RESEND_API_KEY, ADMIN_EMAIL, MAIL_FROM, BASE_URL（サービスURL）, TOKEN_SECRET（本番はランダム長文）"
+      "        Render に設定: RESEND_API_KEY, ADMIN_EMAIL, MAIL_FROM, BASE_URL（サービスURL）, TOKEN_SECRET（本番はランダム長文）"
     );
   }
 }
@@ -417,5 +421,11 @@ app.listen(PORT, () => {
   tryInitFirebaseAdmin();
   console.log(`Kami chat server listening on port ${PORT}`);
   logMailEnvWarning();
+  if (process.env.NODE_ENV === "production" && !isFirebaseConfigured()) {
+    console.warn(
+      "[警告] Firebase Admin 未設定です。claim / GET /api/diagnosis/me 等は 503 になります。" +
+      " FIREBASE_SERVICE_ACCOUNT_JSON または FIREBASE_SERVICE_ACCOUNT_JSON_B64 を Render に設定してください。"
+    );
+  }
   console.log("[config] consultation urgent (priority_guidance):", urgentReception.policySummaryForLog());
 });
