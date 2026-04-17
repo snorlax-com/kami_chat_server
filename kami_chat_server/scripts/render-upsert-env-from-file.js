@@ -17,6 +17,8 @@
 const fs = require("fs");
 const path = require("path");
 
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+
 const apiKey = process.env.RENDER_API_KEY;
 const serviceId = process.env.RENDER_SERVICE_ID;
 const envKey = process.argv[2] || "FIREBASE_SERVICE_ACCOUNT_JSON_B64";
@@ -64,7 +66,7 @@ async function main() {
   try {
     const j = JSON.parse(text);
     bodySnippet = JSON.stringify(j).slice(0, 500);
-  } catch (_) {}
+  } catch (_) { }
   console.log("HTTP", res.status, url.replace(serviceId, serviceId.slice(0, 8) + "…"));
   console.log(bodySnippet);
   if (!res.ok) {
