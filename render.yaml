@@ -41,6 +41,9 @@ services:
         sync: false
       - key: TOKEN_SECRET
         sync: false
+      # Firebase Admin（ID トークン検証）。ダッシュボードまたは npm run render:upsert-firebase-b64 で設定。
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON_B64
+        sync: false
       # 至急を JST で時間帯限定する場合のみ追加（両方セット）。未設定なら 24 時間受付。
       # - key: CONSULTATION_URGENT_JST_HOUR_START
       #   value: "10"

@@ -15,7 +15,8 @@
     "test:consultation-mail": "node --test test/*.test.js",
     "test:identity-api": "node scripts/identity-api-e2e.js",
     "test:all": "node --test test/*.test.js && node scripts/identity-api-e2e.js",
-    "firebase:b64": "node scripts/firebase-service-account-to-b64.js"
+    "firebase:b64": "node scripts/firebase-service-account-to-b64.js",
+    "render:upsert-firebase-b64": "node scripts/render-upsert-env-from-file.js FIREBASE_SERVICE_ACCOUNT_JSON_B64 ./secrets/render-FIREBASE_SERVICE_ACCOUNT_JSON_B64.txt"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
