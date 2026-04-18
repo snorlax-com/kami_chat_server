@@ -7,6 +7,7 @@ import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/services/consultation_identity.dart';
+import 'package:kami_face_oracle/services/bridge_thread_local_store.dart';
 
 /// メールブリッジ（kami_chat_server）上のスレッドで、開発者返信の確認・追記。
 class DeveloperChatPage extends StatefulWidget {
@@ -106,6 +107,35 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
     return max;
   }
 
+  static String _retentionNoticePrefsKey(String chatId) =>
+      'bridge_retention_notice_shown_v1_$chatId';
+
+  Future<void> _maybeShowRetentionNotice(ThreadResponse res) async {
+    if (!res.retentionExpired) return;
+    if (_chatId == null || _chatId!.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final key = _retentionNoticePrefsKey(_chatId!);
+    if (prefs.getBool(key) == true) return;
+    await prefs.setBool(key, true);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('メッセージの保存期間'),
+        content: const Text(
+          '90日が経過したため、サーバー上の以前のメッセージは削除されました。\n'
+          '別の端末に変えた場合や、しばらくログインしていなかった場合にも同様です。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _loadThread({required bool markRead, bool silent = false}) async {
     if (_chatId == null || _chatId!.isEmpty) return;
     if (!silent) {
@@ -114,11 +144,23 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
         _error = null;
       });
     }
-    final res = await _service.getThread(chatId: _chatId!);
+    final cid = _chatId!;
+    final local = await BridgeThreadLocalStore.load(cid);
+    final res = await _service.getThread(chatId: cid);
     if (!mounted) return;
     if (!res.success) {
+      final offline = BridgeThreadLocalStore.merge(local, []);
       final wallet = await CurrencyService.load();
       if (!mounted) return;
+      if (offline.isNotEmpty) {
+        setState(() {
+          _messages = offline;
+          _loading = false;
+          _error = res.error ?? '取得に失敗しました（端末に保存された分のみ表示）';
+          _coins = wallet['coins'] ?? 0;
+        });
+        return;
+      }
       setState(() {
         _loading = false;
         _error = res.error ?? '取得に失敗しました';
@@ -126,8 +168,9 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> {
       });
       return;
     }
-    final sorted = List<BridgeChatMessage>.from(res.messages)
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final sorted = BridgeThreadLocalStore.merge(local, res.messages);
+    await BridgeThreadLocalStore.save(cid, sorted);
+    await _maybeShowRetentionNotice(res);
     if (markRead) {
       final maxDev = _maxDevCreatedAt(sorted);
       if (maxDev > 0) await DeveloperChatPref.setLastSeenDevCreatedAt(maxDev);

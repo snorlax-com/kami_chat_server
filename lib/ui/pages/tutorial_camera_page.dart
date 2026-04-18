@@ -169,8 +169,9 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
       }
     }
     _poseGate.stop();
-    _stopStream();
-    _controller?.dispose();
+    final cam = _controller;
+    _controller = null;
+    unawaited(_safeDisposeCamera(cam));
     _detector.close();
     // 画面の向きの固定を解除
     SystemChrome.setPreferredOrientations([
@@ -195,9 +196,9 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
         _webSimpleController!.stop();
         if (mounted) setState(() {});
       }
-      _stopStream();
-      _controller?.dispose();
+      final cam = _controller;
       _controller = null;
+      unawaited(_safeDisposeCamera(cam));
     } else if (state == AppLifecycleState.resumed) {
       if (!kIsWeb) _init();
     }
@@ -553,6 +554,27 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
       }
     } catch (e) {
       debugPrint('[TUTORIAL_CAM] stopImageStream failed: $e');
+    }
+  }
+
+  /// `dispose()` 前に `stopImageStream` を待たないと、セッション finalizer で
+  /// `RejectedExecutionException` が出る端末がある（Google ログインで Activity が重なると再現しやすい）。
+  Future<void> _safeDisposeCamera(CameraController? cam) async {
+    if (cam == null) return;
+    _streaming = false;
+    try {
+      if (cam.value.isStreamingImages) {
+        await cam.stopImageStream();
+        debugPrint('[TUTORIAL_CAM] safeDispose stopImageStream ok');
+      }
+    } catch (e) {
+      debugPrint('[TUTORIAL_CAM] safeDispose stopImageStream: $e');
+    }
+    try {
+      await cam.dispose();
+      debugPrint('[TUTORIAL_CAM] safeDispose dispose ok');
+    } catch (e) {
+      debugPrint('[TUTORIAL_CAM] safeDispose dispose: $e');
     }
   }
 

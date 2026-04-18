@@ -7,10 +7,34 @@ import 'package:kami_face_oracle/services/auraface_auth_service.dart';
 String _authErrorMessage(FirebaseAuthException e) {
   final msg = (e.message ?? '').toLowerCase();
   final code = e.code.toLowerCase();
-  if (code == 'internal-error' || msg.contains('internal')) {
-    return 'Google ログインで内部エラーが発生しました。\n\n'
-        'Firebase コンソール → プロジェクトの設定 → マイアプリ（Android）で、'
-        'このビルドの署名に合う SHA-1 を登録し、Authentication で「Google」を有効にしてください。';
+  if (code == 'configuration-not-found') {
+    return e.message ??
+        'Firebase Authentication の初期設定が未完了です（CONFIGURATION_NOT_FOUND）。';
+  }
+  if (code == 'internal-error' ||
+      msg.contains('internal') ||
+      msg.contains('configuration_not_found')) {
+    if (msg.contains('configuration_not_found') ||
+        msg.contains('configuration not found')) {
+      return 'Firebase の「ホスト用 Auth 設定」が見つかりません（CONFIGURATION_NOT_FOUND）。\n\n'
+          'Firebase Console → Authentication で「使ってみる」を実行し、Google を有効化してください。'
+          ' プロジェクトに Web アプリが無い場合は追加してください。\n'
+          'Google Cloud で「Identity Toolkit API」が有効かも確認してください。';
+    }
+    final firebaseDetail = (e.message != null && e.message!.trim().isNotEmpty)
+        ? '\n\n--- Firebase からのメッセージ ---\n${e.message}'
+        : '';
+    return 'Google ログインで内部エラーが発生しました（FirebaseAuth: $code）。\n\n'
+        'よくある原因と確認手順:\n'
+        '1) Firebase Console → Authentication → Sign-in method で「Google」を有効化\n'
+        '2) Firebase Console → プロジェクトの設定 → マイアプリ（Android）で SHA-1 を登録し、'
+        'google-services.json を再ダウンロードして置き換え（oauth_client が空のままだと失敗しやすい）\n'
+        '3) Google Cloud Console の OAuth 同意画面が「外部」の場合、テストユーザーに自分のGoogleアカウントを追加\n'
+        '4) Web クライアントID（…apps.googleusercontent.com）は、Firebase の「Web SDK 設定」と一致させる\n'
+        '   （別プロジェクトで作ったクライアントIDだと失敗することがあります）\n'
+        '5) Web クライアント ID の正は lib/config/google_web_client_id.dart（必要なら local.properties で上書き）\n'
+        '6) 開発時は PC で次を実行するとログが取れます: adb logcat | grep -i AurafaceAuth'
+        '$firebaseDetail';
   }
   if (code == 'google-sign-in-failed') {
     return e.message ?? 'Google サインインに失敗しました';
@@ -23,11 +47,18 @@ String _authErrorMessage(FirebaseAuthException e) {
   return e.message ?? e.code;
 }
 
-/// チュートリアル診断後の「ログインして詳細を開示」用ボトムシート
+/// チュートリアル診断後の「ログインして詳細を開示」用ボトムシート（ホームの設定からも利用可）
 class AurafaceAuthSheet extends StatefulWidget {
-  const AurafaceAuthSheet({super.key, required this.onAuthenticated});
+  const AurafaceAuthSheet({
+    super.key,
+    required this.onAuthenticated,
+    this.title,
+    this.subtitle,
+  });
 
   final void Function(User user) onAuthenticated;
+  final String? title;
+  final String? subtitle;
 
   @override
   State<AurafaceAuthSheet> createState() => _AurafaceAuthSheetState();
@@ -152,13 +183,14 @@ class _AurafaceAuthSheetState extends State<AurafaceAuthSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '診断結果を保存して続きを見る',
+              widget.title ?? '診断結果を保存して続きを見る',
               style: Theme.of(context).textTheme.titleLarge,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              '認証後、詳細な性格診断が開示され、次回も同じ内容を確認できます。',
+              widget.subtitle ??
+                  '認証後、詳細な性格診断が開示され、次回も同じ内容を確認できます。',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Colors.white70,
                   ),

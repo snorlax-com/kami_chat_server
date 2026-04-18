@@ -25,6 +25,7 @@ import 'package:kami_face_oracle/ui/pages/privacy_settings_page.dart';
 import 'package:kami_face_oracle/core/e2e.dart';
 import 'package:kami_face_oracle/services/tutorial_diagnosis_local_store.dart';
 import 'package:kami_face_oracle/ui/pages/personality_diagnosis_result_page.dart';
+import 'package:kami_face_oracle/ui/pages/home_account_settings_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -243,6 +244,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               icon: const Icon(Icons.description_outlined),
               tooltip: 'Legal & Privacy',
               onPressed: () => _showLegalMenu(context),
+            ),
+          ),
+          Semantics(
+            label: '設定（ログイン・ログアウト）を開く',
+            button: true,
+            child: IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: '設定',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const HomeAccountSettingsPage(),
+                  ),
+                );
+              },
             ),
           ),
         ],

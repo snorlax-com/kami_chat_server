@@ -20,6 +20,21 @@ const PORT = process.env.PORT || 3000;
 const store = new Map();
 let nextId = 1;
 
+/** サーバー上のチャット本文の保持期間（90日）。超えたメッセージは削除し、メモリ圧迫を防ぐ。 */
+const CHAT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+function pruneChatMessagesInStore() {
+  const now = Date.now();
+  for (const [cid, list] of store) {
+    const kept = list.filter((m) => now - m.createdAt <= CHAT_RETENTION_MS);
+    if (kept.length === 0) {
+      store.delete(cid);
+    } else {
+      store.set(cid, kept);
+    }
+  }
+}
+
 app.use(cors());
 app.use(express.json({ limit: "200kb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -62,6 +77,7 @@ app.get("/health", (req, res) => {
 // --- POST /api/chat/send（保存 + Resend で開発者Gmail。メール失敗時も 200 + mailSent:false）
 app.post("/api/chat/send", async (req, res) => {
   try {
+    pruneChatMessagesInStore();
     const body = req.body || {};
     const { userId, chatId, message, userName } = body;
     const { cleanText, embeddedTierRaw } = types.extractEmbeddedConsultationTier(
@@ -191,6 +207,7 @@ app.post("/api/chat/send", async (req, res) => {
           userId: bridgeUserId,
           consultationType,
           now: new Date().toISOString(),
+          lastMessageAtMs: createdAt,
         });
       } catch (threadErr) {
         console.error("[chat/send] thread_index_failed", threadErr);
@@ -238,6 +255,7 @@ app.post("/api/chat/send", async (req, res) => {
 });
 
 app.get("/api/chat/thread", (req, res) => {
+  pruneChatMessagesInStore();
   const chatId = req.query.chatId || "default";
   const list = store.get(chatId) || [];
   const since = req.query.since ? Number(req.query.since) : null;
@@ -262,11 +280,19 @@ app.get("/api/chat/thread", (req, res) => {
     }
     return base;
   });
-  res.json({ status: "ok", chatId, messages: messagesOut });
+  let retentionExpired = false;
+  if (messagesOut.length === 0) {
+    const lastMs = idb.getThreadLastMessageAtMs(chatId);
+    if (lastMs != null && Date.now() - lastMs > CHAT_RETENTION_MS) {
+      retentionExpired = true;
+    }
+  }
+  res.json({ status: "ok", chatId, messages: messagesOut, retentionExpired });
 });
 
 // テスト用: 開発者返信を追加
 app.post("/api/chat/dev-reply", (req, res) => {
+  pruneChatMessagesInStore();
   const { chatId, text } = req.body || {};
   const cid = chatId || "default";
   const msg = text != null ? String(text).trim() : "";
@@ -277,6 +303,11 @@ app.post("/api/chat/dev-reply", (req, res) => {
   const id = nextId++;
   const createdAt = Date.now();
   store.get(cid).push({ id, role: "dev", text: msg, createdAt });
+  try {
+    idb.bumpThreadLastMessageAtMs(cid, createdAt);
+  } catch (e) {
+    console.error("[chat/dev-reply] bumpThreadLastMessageAtMs", e);
+  }
   console.log("[chat/dev-reply]", { chatId: cid, text: msg });
   res.json({ status: "received", chatId: cid, messageId: id });
 });
@@ -284,6 +315,7 @@ app.post("/api/chat/dev-reply", (req, res) => {
 // --- GET /admin/reply（メモリストア + トークン）
 app.get("/admin/reply", (req, res) => {
   try {
+    pruneChatMessagesInStore();
     const { chatId, token, expires, consultationType: qConsultationType } = req.query;
 
     if (!verifyToken(chatId, token, expires)) {
@@ -369,6 +401,7 @@ app.get("/admin/reply", (req, res) => {
 // --- POST /admin/reply
 app.post("/admin/reply", (req, res) => {
   try {
+    pruneChatMessagesInStore();
     const { chatId, token, expires, message, consultationType: bodyConsultationType } = req.body || {};
     const effectiveConsultationType = types.normalizeConsultationType(bodyConsultationType);
 
@@ -387,6 +420,11 @@ app.post("/admin/reply", (req, res) => {
     const id = nextId++;
     const createdAt = Date.now();
     store.get(chatId).push({ id, role: "dev", text, createdAt });
+    try {
+      idb.bumpThreadLastMessageAtMs(chatId, createdAt);
+    } catch (e) {
+      console.error("[admin/reply POST] bumpThreadLastMessageAtMs", e);
+    }
 
     console.log("[admin/reply POST] saved dev message", { chatId, len: text.length });
     res.setHeader("Content-Type", "text/html; charset=utf-8");

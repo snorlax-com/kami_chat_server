@@ -61,18 +61,22 @@ async function main() {
     },
     body: JSON.stringify({ value }),
   });
-  const text = await res.text();
-  let bodySnippet = text;
-  try {
-    const j = JSON.parse(text);
-    bodySnippet = JSON.stringify(j).slice(0, 500);
-  } catch (_) { }
   console.log("HTTP", res.status, url.replace(serviceId, serviceId.slice(0, 8) + "…"));
-  console.log(bodySnippet);
   if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try {
+      const j = JSON.parse(text);
+      msg = j && j.message ? String(j.message) : JSON.stringify(j);
+    } catch (_) { }
+    console.error("FAILED:", String(msg).slice(0, 300));
     console.error("FAILED: API が成功しませんでした。キー・Service ID・権限を確認してください。");
     process.exit(1);
   }
+  // Render のレスポンスには value（秘密）が含まれ得るので、成功時も本文は出力しない。
+  try {
+    await res.text();
+  } catch (_) { }
   console.log("OK: 環境変数を保存しました。Render が自動で再デプロイするまで 1〜3 分待ってから /health を確認してください。");
 }
 

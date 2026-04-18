@@ -75,7 +75,21 @@ create table if not exists messages (
   foreign key(thread_id) references chat_threads(id)
 );
 `);
+  _migrateChatThreadsLastMessage(db);
   return db;
+}
+
+/** 既存 DB に last_message_at_ms を追加（メッセージ保持期限判定用） */
+function _migrateChatThreadsLastMessage(db) {
+  try {
+    const cols = db.prepare(`pragma table_info(chat_threads)`).all();
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has("last_message_at_ms")) {
+      db.exec(`alter table chat_threads add column last_message_at_ms integer`);
+    }
+  } catch (e) {
+    console.error("[identityDb] migrate last_message_at_ms", e);
+  }
 }
 
 function getDb() {
@@ -180,22 +194,59 @@ function getLatestDiagnosisForUser(userId, { includeDetail }) {
   return base;
 }
 
-function upsertChatThread({ chatId, userId, consultationType, now }) {
+function upsertChatThread({ chatId, userId, consultationType, now, lastMessageAtMs }) {
   if (!chatId || !userId) return;
   const db = getDb();
+  const lm = lastMessageAtMs != null ? Number(lastMessageAtMs) : null;
   const existing = db.prepare(`select id from chat_threads where id = ?`).get(chatId);
   if (existing) {
-    db.prepare(`update chat_threads set consultation_type = ?, updated_at = ? where id = ?`).run(
-      consultationType,
-      now,
-      chatId
-    );
+    if (lm != null && !Number.isNaN(lm)) {
+      db.prepare(
+        `update chat_threads set consultation_type = ?, updated_at = ?,
+         last_message_at_ms = CASE
+           WHEN coalesce(last_message_at_ms, 0) < ? THEN ?
+           ELSE coalesce(last_message_at_ms, 0)
+         END
+         where id = ?`
+      ).run(consultationType, now, lm, lm, chatId);
+    } else {
+      db.prepare(`update chat_threads set consultation_type = ?, updated_at = ? where id = ?`).run(
+        consultationType,
+        now,
+        chatId
+      );
+    }
   } else {
     db.prepare(`
-insert into chat_threads (id, user_id, consultation_type, created_at, updated_at)
-values (?, ?, ?, ?, ?)
-`).run(chatId, userId, consultationType, now, now);
+insert into chat_threads (id, user_id, consultation_type, created_at, updated_at, last_message_at_ms)
+values (?, ?, ?, ?, ?, ?)
+`).run(chatId, userId, consultationType, now, now, lm != null && !Number.isNaN(lm) ? lm : null);
   }
+}
+
+/** スレッドの最新メッセージ時刻（Unix ms）。無ければ null。 */
+function getThreadLastMessageAtMs(chatId) {
+  if (!chatId) return null;
+  const db = getDb();
+  const r = db.prepare(`select last_message_at_ms from chat_threads where id = ?`).get(chatId);
+  if (!r || r.last_message_at_ms == null) return null;
+  const n = Number(r.last_message_at_ms);
+  return Number.isNaN(n) ? null : n;
+}
+
+/** 開発者返信など userId 無しで時刻だけ進める（行が無ければ何もしない） */
+function bumpThreadLastMessageAtMs(chatId, createdAtMs) {
+  if (!chatId || createdAtMs == null) return;
+  const ms = Number(createdAtMs);
+  if (Number.isNaN(ms)) return;
+  const db = getDb();
+  const row = db.prepare(`select last_message_at_ms from chat_threads where id = ?`).get(chatId);
+  if (!row) return;
+  const prev = row.last_message_at_ms != null ? Number(row.last_message_at_ms) : 0;
+  const next = Math.max(Number.isNaN(prev) ? 0 : prev, ms);
+  db.prepare(
+    `update chat_threads set last_message_at_ms = ?, updated_at = ? where id = ?`
+  ).run(next, new Date().toISOString(), chatId);
 }
 
 function listThreadsForUser(userId) {
@@ -217,5 +268,7 @@ module.exports = {
   claimGuestDiagnosisToUser,
   getLatestDiagnosisForUser,
   upsertChatThread,
+  getThreadLastMessageAtMs,
+  bumpThreadLastMessageAtMs,
   listThreadsForUser,
 };

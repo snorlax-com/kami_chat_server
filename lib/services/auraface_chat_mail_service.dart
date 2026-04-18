@@ -430,7 +430,7 @@ class AuraFaceChatMailService {
       if (res.body.isEmpty) {
         _log('[MailBridge] thread empty response status=${res.statusCode}');
         if (res.statusCode == 200) {
-          return ThreadResponse(success: true, chatId: chatId, messages: []);
+          return ThreadResponse(success: true, chatId: chatId, messages: const []);
         }
         return ThreadResponse(success: false, error: _classifyError(Exception('empty'), res.statusCode, res.body));
       }
@@ -450,8 +450,14 @@ class AuraFaceChatMailService {
       }
       if (res.statusCode == 200 && body != null) {
         final list = body['messages'];
+        final retentionExpired = _coerceBool(body['retentionExpired']) == true;
         if (list == null) {
-          return ThreadResponse(success: true, chatId: body['chatId'] as String? ?? chatId, messages: []);
+          return ThreadResponse(
+            success: true,
+            chatId: body['chatId'] as String? ?? chatId,
+            messages: const [],
+            retentionExpired: retentionExpired,
+          );
         }
         final messages = (list as List<dynamic>)
             .map((m) {
@@ -477,6 +483,7 @@ class AuraFaceChatMailService {
           success: true,
           chatId: body['chatId'] as String? ?? chatId,
           messages: messages,
+          retentionExpired: retentionExpired,
         );
       }
       final err = body?['error']?.toString() ?? 'HTTP ${res.statusCode}';
@@ -565,10 +572,14 @@ class ThreadResponse {
   final List<BridgeChatMessage> messages;
   final String? error;
 
+  /// サーバー上の保持期限（90日）を過ぎ、当該スレッドのメッセージはサーバーから削除済み。
+  final bool retentionExpired;
+
   ThreadResponse({
     required this.success,
     this.chatId,
     this.messages = const [],
     this.error,
+    this.retentionExpired = false,
   });
 }
