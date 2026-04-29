@@ -161,9 +161,9 @@ class BackgroundMusicService {
     try {
       final pillarIdLower = pillarId.toLowerCase();
 
-      // 既に同じ瞑想音楽が再生中の場合は何もしない
-      if (_currentMeditationMusic == pillarIdLower && _isBGMPlaying) {
-        debugPrint('[BackgroundMusicService] 既に瞑想音楽が再生中: $pillarIdLower');
+      // 既に同じ柱の瞑想トラックが選ばれている場合は連続で止めない（通常BGM再生中でも切替しない）
+      if (_currentMeditationMusic == pillarIdLower) {
+        debugPrint('[BackgroundMusicService] 既に同じ瞑想トラック: $pillarIdLower');
         return;
       }
 

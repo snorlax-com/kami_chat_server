@@ -5,8 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/core/deities.dart';
 import 'package:kami_face_oracle/core/personality_tree_classifier.dart';
-import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
+import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/services/diagnosis_api_service.dart';
 import 'package:kami_face_oracle/services/guest_session_service.dart';
 import 'package:kami_face_oracle/services/personality_type_detail_service.dart';
@@ -147,16 +147,8 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
         characterImagePath: characterImagePath,
         pillarTitle: pillarTitle,
       );
-      await _initBackgroundMusic(pillarId);
-      await _maybePostTutorialToServer(pillarId);
-    }
-  }
-
-  Future<void> _initBackgroundMusic(String pillarId) async {
-    try {
       await BackgroundMusicService().playMeditationMusic(pillarId.toLowerCase());
-    } catch (e) {
-      debugPrint('[PersonalityDiagnosisResultPage] BGM: $e');
+      await _maybePostTutorialToServer(pillarId);
     }
   }
 

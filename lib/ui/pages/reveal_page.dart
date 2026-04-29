@@ -66,11 +66,11 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
   late final Animation<double> _scale;
   late final Animation<double> _opacity;
   final AudioPlayer _player = AudioPlayer();
-  AudioPlayer? _meditationPlayer; // 瞑想音楽用
   bool _played = false;
   bool _showFinal = false;
   late final Animation<double> _spin; // ぐるぐる演出用
   Deity? _actualGod; // 実際に表示する神（サーバー結果から取得）
+  bool _pillarRevealMeditationScheduled = false;
 
   // 顔輪郭アニメーション用
   ui.Image? _tutorialImage;
@@ -138,8 +138,10 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
     // チュートリアルモードでは、アニメーション完了後に_showFinalをtrueにするため、ここでは設定しない
     if (!widget.isTutorial || (widget.tutorialImagePath == null && widget.tutorialImageBytes == null)) {
       // 通常モードは2秒後
-      Timer(const Duration(milliseconds: 2000), () {
-        if (mounted) setState(() => _showFinal = true);
+      Timer(const Duration(milliseconds: 2000), () async {
+        if (!mounted) return;
+        setState(() => _showFinal = true);
+        await _tryStartRevealMeditationForPersonalityDiagnosis();
       });
     }
     // 効果音または瞑想音楽を再生
@@ -147,10 +149,9 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
       if (_played) return;
       _played = true;
 
-      // 性格診断結果がある場合は瞑想音楽を再生（柱降臨後の音楽）
+      // 性格診断あり: 柱確定後は瞑想トラック（Reveal内で開始）。なし: リビール効果音のみ
       if (widget.personalityDiagnosisResult != null) {
-        // 柱降臨後の音楽を優先するため、すべてのBGMを停止
-        await _playMeditationMusic();
+        return;
       } else {
         // 効果音を再生（一時停止のみ）
         BackgroundMusicService().pauseForOtherSound();
@@ -165,6 +166,21 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
         }
       }
     });
+  }
+
+  /// 性格診断で柱が確定したリビールで、その柱の瞑想トラックを再生（効果音は鳴らさない）。
+  Future<void> _tryStartRevealMeditationForPersonalityDiagnosis() async {
+    if (!mounted) return;
+    if (_pillarRevealMeditationScheduled) return;
+    if (widget.personalityDiagnosisResult == null) return;
+    if (!_showFinal || _actualGod == null) return;
+
+    _pillarRevealMeditationScheduled = true;
+    try {
+      await BackgroundMusicService().playMeditationMusic(_actualGod!.id.toLowerCase());
+    } catch (e) {
+      debugPrint('[RevealPage] 瞑想音の再生でエラー（無視）: $e');
+    }
   }
 
   Future<void> _loadTutorialImage() async {
@@ -246,6 +262,7 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
       setState(() {
         _showFinal = true;
       });
+      await _tryStartRevealMeditationForPersonalityDiagnosis();
     }
   }
 
@@ -266,42 +283,28 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
           );
           print('[RevealPage] 取得した神: ${_actualGod!.id} (${_actualGod!.nameJa})');
           if (mounted) setState(() {});
+          await _tryStartRevealMeditationForPersonalityDiagnosis();
         } catch (e) {
           print('[RevealPage] ⚠️ 神の取得エラー: $e');
           _actualGod = widget.god ?? deities.first;
           if (mounted) setState(() {});
+          await _tryStartRevealMeditationForPersonalityDiagnosis();
         }
       } else {
         print('[RevealPage] ⚠️ 詳細情報の取得に失敗');
         _actualGod = widget.god ?? deities.first;
         if (mounted) setState(() {});
+        await _tryStartRevealMeditationForPersonalityDiagnosis();
       }
     } else {
       // サーバー結果がない場合は、渡されたgodを使用
       _actualGod = widget.god ?? deities.first;
-    }
-  }
-
-  Future<void> _playMeditationMusic() async {
-    try {
-      // pillarIdを取得
-      final detail = await PersonalityTypeDetailService.getDetail(widget.personalityDiagnosisResult!.personalityType);
-      if (detail == null) return;
-
-      final pillarId = detail.pillarId.toLowerCase();
-
-      // BackgroundMusicServiceを使用して音楽を再生（一度だけ、継続再生）
-      await BackgroundMusicService().playMeditationMusic(pillarId);
-      print('[RevealPage] 瞑想音楽をBackgroundMusicServiceで再生: $pillarId');
-    } catch (e) {
-      print('[RevealPage] 瞑想音楽再生エラー: $e');
+      await _tryStartRevealMeditationForPersonalityDiagnosis();
     }
   }
 
   @override
   void dispose() {
-    // 瞑想音楽はBackgroundMusicServiceで管理されているため、ここでは停止しない
-    // ホームに戻っても継続再生される
     _player.dispose();
     _ctrl.dispose();
     // 顔輪郭アニメーション用コントローラーを破棄
