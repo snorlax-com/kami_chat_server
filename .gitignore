@@ -24,6 +24,9 @@
 build/
 coverage/
 
+# Flutter assets (kept locally; large binaries)
+assets/
+
 # Firebase (API keys; keep local or use CI secrets)
 android/app/google-services.json
 
@@ -56,6 +59,9 @@ e2e/playwright/.cache/
 github_chat_minimal/
 macos/
 macos_backup_*/
+
+# Lockfile (keep local in this repo layout)
+pubspec.lock
 
 # Miscellaneous
 debug_logcat_filtered.txt
