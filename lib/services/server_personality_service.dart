@@ -89,7 +89,7 @@ class ServerPersonalityService {
         print('[ServerPersonalityService] ❌ タイムアウト');
       } else {
         print('[ServerPersonalityService] ❌ エラー: $e');
-        print('[ServerPersonalityService] スタック: ${stackTrace.toString().split("\n").take(5).join("\n")}');
+        print('[ServerPersonalityService] スタック: ${stackTrace?.toString().split("\n").take(5).join("\n")}');
       }
       rethrow;
     }
@@ -182,63 +182,6 @@ class ServerPersonalityService {
   static PersonalityTreeDiagnosisResult _convertServerResponseToResult(
     Map<String, dynamic> jsonData,
   ) {
-    // サーバー実装差異吸収:
-    // - 一部のAPIは result フィールド内に本体が入る
-    // - キー名が snake_case / camelCase / 大文字小文字混在することがある
-    final payload = () {
-      final r = jsonData['result'];
-      if (r is Map) return Map<String, dynamic>.from(r);
-      return jsonData;
-    }();
-
-    int? readInt(List<String> keys) {
-      for (final k in keys) {
-        final v = payload[k] ?? jsonData[k];
-        if (v == null) continue;
-        if (v is int) return v;
-        if (v is num) return v.toInt();
-        final s = v.toString().trim();
-        final parsed = int.tryParse(s);
-        if (parsed != null) return parsed;
-      }
-      return null;
-    }
-
-    String? readString(List<String> keys) {
-      for (final k in keys) {
-        final v = payload[k] ?? jsonData[k];
-        if (v == null) continue;
-        final s = v.toString();
-        if (s.isNotEmpty) return s;
-      }
-      return null;
-    }
-
-    dynamic readLayerValue(int i) {
-      final candidates = <String>[
-        'L$i',
-        'l$i',
-        'layer$i',
-        'layer_$i',
-      ];
-      for (final k in candidates) {
-        if (payload.containsKey(k)) return payload[k];
-        if (jsonData.containsKey(k)) return jsonData[k];
-      }
-      // まとめて返す形式: { layers: { L1: "...", ... } } / { layer_results: { ... } }
-      final groupedKeys = <String>['layers', 'layer_results', 'layerResults'];
-      for (final gk in groupedKeys) {
-        final g = payload[gk] ?? jsonData[gk];
-        if (g is Map) {
-          final gm = Map<String, dynamic>.from(g);
-          for (final k in candidates) {
-            if (gm.containsKey(k)) return gm[k];
-          }
-        }
-      }
-      return null;
-    }
-
     // Layer結果を取得（サーバーからのL1-L9を日本語形式に変換）
     final layerResults = <String, String>{};
     final layerNames = {
@@ -254,51 +197,24 @@ class ServerPersonalityService {
     };
 
     for (int i = 1; i <= 9; i++) {
-      final v = readLayerValue(i);
-      if (v != null) {
-        final layerKey = 'L$i';
+      final layerKey = 'L$i';
+      if (jsonData.containsKey(layerKey)) {
         final layerName = layerNames[layerKey] ?? layerKey;
-        layerResults[layerName] = v.toString();
-        print('[ServerPersonalityService] $layerName: $v');
+        layerResults[layerName] = jsonData[layerKey].toString();
+        print('[ServerPersonalityService] $layerName: ${jsonData[layerKey]}');
       }
     }
 
     // 性格タイプを取得
-    final personalityType = readInt(
-          const [
-            'personality_type',
-            'personalityType',
-            'personality_type_id',
-            'personalityTypeId',
-            'type',
-          ],
-        ) ??
-        1;
-    final personalityTypeName = readString(
-          const [
-            'personality_type_name',
-            'personalityTypeName',
-            'type_name',
-            'typeName',
-          ],
-        ) ??
-        'タイプ$personalityType';
-
-    // 説明文（サーバーが返す場合は最優先）
-    final personalityDescription = readString(
-          const [
-            'personality_description',
-            'personalityDescription',
-            'type_description',
-            'typeDescription',
-          ],
-        ) ??
-        _getPersonalityDescription(personalityType);
+    final personalityType = jsonData['personality_type'] as int? ?? 1;
+    final personalityTypeName = jsonData['personality_type_name'] as String? ?? 'タイプ$personalityType';
 
     // 柱情報を取得（サーバーから来る場合）
-    final pillarId = readString(const ['pillar_id', 'pillarId']);
-    final pillarTitle = readString(const ['pillar_title', 'pillarTitle']);
-    final characterImage = readString(const ['character_image', 'characterImage']);
+    final pillarId = jsonData['pillar_id'] as String?;
+    final pillarName = jsonData['pillar_name'] as String?;
+    final pillarTitle = jsonData['pillar_title'] as String?;
+    final characterImage = jsonData['character_image'] as String?;
+    final illustrationImage = jsonData['illustration_image'] as String?;
 
     // 柱情報をログ出力
     if (pillarId != null) {
@@ -325,7 +241,7 @@ class ServerPersonalityService {
     return PersonalityTreeDiagnosisResult(
       personalityType: personalityType,
       personalityTypeName: personalityTypeName,
-      personalityDescription: personalityDescription,
+      personalityDescription: _getPersonalityDescription(personalityType),
       layerResults: layerResults,
       layerValues: layerValues,
       layerReasons: <String, String>{}, // サーバーからは理由が来ないため空

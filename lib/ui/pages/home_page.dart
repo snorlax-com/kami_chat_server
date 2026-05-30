@@ -2,33 +2,133 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:kami_face_oracle/core/storage.dart';
-import 'package:kami_face_oracle/ui/pages/capture_page.dart';
-import 'package:kami_face_oracle/ui/pages/collection_page.dart';
-import 'package:kami_face_oracle/ui/pages/tutorial_yosen_page.dart';
+import 'package:kami_face_oracle/ui/pages/tutorial_intro_page.dart';
 import 'package:kami_face_oracle/core/deities.dart';
 import 'package:kami_face_oracle/core/deity.dart';
-import 'package:kami_face_oracle/ui/pages/gacha_page.dart';
 import 'package:kami_face_oracle/ui/pages/meditation_page.dart';
-import 'package:kami_face_oracle/ui/pages/consultation_page.dart';
 import 'package:kami_face_oracle/ui/pages/store_page.dart';
-import 'package:kami_face_oracle/pages/history_page.dart' as legacy_history;
 import 'package:kami_face_oracle/services/currency_service.dart';
-import 'package:kami_face_oracle/ui/pages/test_radar_chart_page.dart';
-import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
-import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
-import 'package:kami_face_oracle/services/developer_chat_unread_service.dart';
-import 'package:kami_face_oracle/ui/pages/all_pillars_gallery_page.dart';
-import 'package:kami_face_oracle/features/consent/consent_service.dart';
-import 'package:kami_face_oracle/features/consent/widgets/biometric_consent_modal.dart';
 import 'package:kami_face_oracle/ui/pages/legal_document_page.dart';
 import 'package:kami_face_oracle/ui/pages/privacy_settings_page.dart';
 import 'package:kami_face_oracle/core/e2e.dart';
 import 'package:kami_face_oracle/services/tutorial_diagnosis_local_store.dart';
 import 'package:kami_face_oracle/ui/pages/personality_diagnosis_result_page.dart';
 import 'package:kami_face_oracle/ui/pages/home_account_settings_page.dart';
+import 'package:kami_face_oracle/services/personality_type_detail_service.dart';
+import 'package:kami_face_oracle/models/personality_type_detail.dart';
+
+void showHomeLegalMenu(BuildContext context) {
+  showModalBottomSheet(
+    context: context,
+    builder: (ctx) => SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.all(16),
+        children: [
+          const ListTile(
+            title: Text('Legal & Privacy', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings),
+            title: const Text('Privacy & Consent (Withdraw)'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) => const PrivacySettingsPage(),
+                  ));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.description),
+            title: const Text('Terms of Service'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const LegalDocumentPage(title: 'Terms of Service', assetPath: 'assets/legal/terms_en.txt'),
+                  ));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.privacy_tip_outlined),
+            title: const Text('Privacy Policy'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const LegalDocumentPage(title: 'Privacy Policy', assetPath: 'assets/legal/privacy_en.txt'),
+                  ));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.fingerprint),
+            title: const Text('Biometric Policy & Release'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) => const LegalDocumentPage(
+                        title: 'Biometric Policy & Release', assetPath: 'assets/legal/biometric_en.txt'),
+                  ));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.smart_toy_outlined),
+            title: const Text('AI Transparency Notice'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) => const LegalDocumentPage(
+                        title: 'AI Transparency Notice', assetPath: 'assets/legal/ai_transparency_en.txt'),
+                  ));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.cookie_outlined),
+            title: const Text('Cookie Policy'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) => const LegalDocumentPage(
+                        title: 'Cookie Policy', assetPath: 'assets/legal/cookie_policy_en.txt'),
+                  ));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.data_object),
+            title: const Text('Data Requests (Access / Delete)'),
+            onTap: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                  ctx,
+                  MaterialPageRoute(
+                    builder: (_) => const LegalDocumentPage(
+                        title: 'Data Requests', assetPath: 'assets/legal/data_requests_en.txt'),
+                  ));
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.embedInShell = false});
+
+  /// タブシェル内では [false]。独自の [AppBar] を出さない。
+  final bool embedInShell;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -40,9 +140,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   int _gems = 0;
   int _fragments = 0;
   Deity? _tutorialDeity; // チュートリアルで選ばれた神
+  PersonalityTypeDetail? _tutorialPillarDetail; // 柱に紐づく性格説明（JSON）
   late AnimationController _glowController;
-  bool _devReplyUnread = false;
-  Timer? _unreadPollTimer;
   bool _hasCachedTutorialDiagnosis = false;
 
   @override
@@ -54,8 +153,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       vsync: this,
       duration: const Duration(seconds: 3),
     )..repeat();
-    _unreadPollTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshDevUnread());
-    _refreshDevUnread();
     _loadCachedDiagnosisFlag();
   }
 
@@ -67,7 +164,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _unreadPollTimer?.cancel();
     _glowController.dispose();
     super.dispose();
   }
@@ -75,15 +171,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _refreshDevUnread();
       _loadCachedDiagnosisFlag();
-    }
-  }
-
-  Future<void> _refreshDevUnread() async {
-    final u = await DeveloperChatUnreadService.hasUnreadReply();
-    if (mounted && _devReplyUnread != u) {
-      setState(() => _devReplyUnread = u);
+      _loadTutorialDeity();
     }
   }
 
@@ -104,125 +193,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     });
   }
 
-  static void _showLegalMenu(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(16),
-          children: [
-            const ListTile(
-              title: Text('Legal & Privacy', style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: const Text('Privacy & Consent (Withdraw)'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                    ctx,
-                    MaterialPageRoute(
-                      builder: (_) => const PrivacySettingsPage(),
-                    ));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.description),
-              title: const Text('Terms of Service'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                    ctx,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          const LegalDocumentPage(title: 'Terms of Service', assetPath: 'assets/legal/terms_en.txt'),
-                    ));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.privacy_tip_outlined),
-              title: const Text('Privacy Policy'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                    ctx,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          const LegalDocumentPage(title: 'Privacy Policy', assetPath: 'assets/legal/privacy_en.txt'),
-                    ));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.fingerprint),
-              title: const Text('Biometric Policy & Release'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                    ctx,
-                    MaterialPageRoute(
-                      builder: (_) => const LegalDocumentPage(
-                          title: 'Biometric Policy & Release', assetPath: 'assets/legal/biometric_en.txt'),
-                    ));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.smart_toy_outlined),
-              title: const Text('AI Transparency Notice'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                    ctx,
-                    MaterialPageRoute(
-                      builder: (_) => const LegalDocumentPage(
-                          title: 'AI Transparency Notice', assetPath: 'assets/legal/ai_transparency_en.txt'),
-                    ));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.cookie_outlined),
-              title: const Text('Cookie Policy'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                    ctx,
-                    MaterialPageRoute(
-                      builder: (_) => const LegalDocumentPage(
-                          title: 'Cookie Policy', assetPath: 'assets/legal/cookie_policy_en.txt'),
-                    ));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.data_object),
-              title: const Text('Data Requests (Access / Delete)'),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                    ctx,
-                    MaterialPageRoute(
-                      builder: (_) => const LegalDocumentPage(
-                          title: 'Data Requests', assetPath: 'assets/legal/data_requests_en.txt'),
-                    ));
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Future<void> _loadTutorialDeity() async {
     final deityId = await Storage.getTutorialDeity();
-    if (deityId != null) {
-      final deity = deities.firstWhere(
-        (d) => d.id == deityId,
-        orElse: () => deities.first,
-      );
+    if (deityId == null) {
       if (mounted) {
         setState(() {
-          _tutorialDeity = deity;
+          _tutorialDeity = null;
+          _tutorialPillarDetail = null;
         });
       }
+      return;
+    }
+    final deity = deities.firstWhere(
+      (d) => d.id == deityId,
+      orElse: () => deities.first,
+    );
+    final detail = await PersonalityTypeDetailService.getDetailByPillarId(deityId);
+    if (mounted) {
+      setState(() {
+        _tutorialDeity = deity;
+        _tutorialPillarDetail = detail;
+      });
     }
   }
 
@@ -232,52 +223,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         ? Color(int.parse(_tutorialDeity!.colorHex.replaceFirst('#', '0xff')))
         : const Color(0xFF6C63FF);
 
-    final body = Scaffold(
-      appBar: AppBar(
-        title: const Text('神が降臨する顔占い'),
-        elevation: 0,
-        actions: [
-          Semantics(
-            label: '利用規約とプライバシー、同意設定を開く',
-            button: true,
-            child: IconButton(
-              icon: const Icon(Icons.description_outlined),
-              tooltip: 'Legal & Privacy',
-              onPressed: () => _showLegalMenu(context),
-            ),
-          ),
-          Semantics(
-            label: '設定（ログイン・ログアウト）を開く',
-            button: true,
-            child: IconButton(
-              icon: const Icon(Icons.settings_outlined),
-              tooltip: '設定',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => const HomeAccountSettingsPage(),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-        flexibleSpace: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                const Color(0xFF8B5CF6).withOpacity(0.3),
-                const Color(0xFF06B6D4).withOpacity(0.2),
-                const Color(0xFF0A0E1A),
-              ],
-            ),
-          ),
-        ),
-      ),
-      body: Stack(
+    final stack = Stack(
         children: [
           // 背景：チュートリアルで選ばれた神があればその神を大きく、なければ18柱のシンボルグリッド
           Positioned.fill(
@@ -455,48 +401,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       setState(() => _point = v);
                     },
                   ),
+                  if (_tutorialDeity != null) ...[
+                    const SizedBox(height: 20),
+                    _TutorialPillarHomeCard(
+                      deity: _tutorialDeity!,
+                      detail: _tutorialPillarDetail,
+                    ),
+                  ],
                   const SizedBox(height: 24),
-                  // メインアクション：写真撮影（目立つカードデザイン）
-                  _MainActionCard(
-                    onPressed: () async {
-                      final canUse = await ConsentService.instance.canUseBiometricFeatures();
-                      if (!canUse) {
-                        final ok = await BiometricConsentModal.show(context);
-                        if (!ok || !context.mounted) return;
-                      }
-                      if (!context.mounted) return;
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => const CapturePage()));
-                    },
-                    deityColor: deityColor,
-                  ),
-                  const SizedBox(height: 20),
                   // 機能カード（2列グリッド）
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _FeatureCard(
-                          icon: Icons.collections_bookmark,
-                          title: '神図鑑',
-                          subtitle: '18柱の神',
-                          color: const Color(0xFF6C63FF),
-                          onPressed: () =>
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const CollectionPage())),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _FeatureCard(
-                          icon: Icons.casino,
-                          title: 'ガチャ',
-                          subtitle: '神を呼ぶ',
-                          color: const Color(0xFFFF6B9D),
-                          onPressed: () =>
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const GachaPage())),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(
@@ -512,45 +425,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       const SizedBox(width: 12),
                       Expanded(
                         child: _FeatureCard(
-                          key: const Key('e2e-consultation'),
-                          icon: Icons.support_agent,
-                          title: '占い相談',
-                          subtitle: 'プロの占い',
-                          color: const Color(0xFFC084FC),
-                          onPressed: () =>
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const ConsultationPage())),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _FeatureCard(
-                          key: const Key('e2e-developer-chat'),
-                          icon: Icons.forum_outlined,
-                          title: '開発者とのやりとり',
-                          subtitle: '返信の確認・追記',
-                          color: const Color(0xFF38BDF8),
-                          showUnreadDot: _devReplyUnread,
-                          onPressed: () async {
-                            await Navigator.push<void>(
-                              context,
-                              MaterialPageRoute(builder: (_) => const DeveloperChatPage()),
-                            );
-                            if (!context.mounted) return;
-                            _refreshDevUnread();
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _FeatureCard(
                           icon: Icons.store,
                           title: 'ストア',
                           subtitle: 'アイテム',
@@ -559,34 +433,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                               Navigator.push(context, MaterialPageRoute(builder: (_) => const StorePage())),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _FeatureCard(
-                          icon: Icons.history,
-                          title: '履歴',
-                          subtitle: '過去の結果',
-                          color: const Color(0xFF8B5CF6),
-                          onPressed: () => Navigator.push(
-                              context, MaterialPageRoute(builder: (_) => const legacy_history.HistoryPage())),
-                        ),
-                      ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  // 柱の写真一覧ボタン
-                  Semantics(
-                    button: true,
-                    label: 'すべての柱の写真を表示',
-                    child: OutlinedButton.icon(
-                      onPressed: () =>
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const AllPillarsGalleryPage())),
-                      icon: const Icon(Icons.photo_library),
-                      label: const Text('すべての柱の写真'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: Colors.white.withOpacity(0.3), width: 1.5),
-                      ),
-                    ),
                   ),
                   const SizedBox(height: 12),
                   // チュートリアルボタン（E2E: data-testid 代わりに Key）
@@ -596,7 +443,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     child: OutlinedButton.icon(
                       key: const Key('e2e-tutorial'),
                       onPressed: () =>
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const TutorialYosenPage())),
+                          Navigator.push(context, MaterialPageRoute(builder: (_) => const TutorialIntroPage())),
                       icon: const Icon(Icons.school),
                       label: const Text('チュートリアル'),
                       style: OutlinedButton.styleFrom(
@@ -631,47 +478,243 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                       ),
                     ),
                   ],
-                  const SizedBox(height: 12),
-                  // テスト用：診断チャート表示ボタン
-                  Semantics(
-                    button: true,
-                    label: '診断チャート（テスト）を表示',
-                    child: OutlinedButton.icon(
-                      onPressed: () =>
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const TestRadarChartPage())),
-                      icon: const Icon(Icons.analytics),
-                      label: const Text('診断チャート（テスト）'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: Colors.green.withOpacity(0.5), width: 1.5),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // メール返信テスト（送信→Gmail返信ページで返信→アプリに反映）
-                  Semantics(
-                    button: true,
-                    label: 'メール返信テストを開く',
-                    child: OutlinedButton.icon(
-                      onPressed: () => Navigator.push(
-                          context, MaterialPageRoute(builder: (_) => const ConsultationMailBridgeTestPage())),
-                      icon: const Icon(Icons.mark_email_read),
-                      label: const Text('メール返信テスト'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: Colors.cyan.withOpacity(0.5), width: 1.5),
-                      ),
-                    ),
-                  ),
                   const SizedBox(height: 24),
                 ],
               ),
             ),
           )
         ],
+      );
+
+    if (widget.embedInShell) {
+      final w = E2E.isEnabled ? Semantics(label: 'e2e-home-ready', child: stack) : stack;
+      return w;
+    }
+
+    final body = Scaffold(
+      appBar: AppBar(
+        title: const Text('神が降臨する顔占い'),
+        elevation: 0,
+        actions: [
+          Semantics(
+            label: '利用規約とプライバシー、同意設定を開く',
+            button: true,
+            child: IconButton(
+              icon: const Icon(Icons.description_outlined),
+              tooltip: 'Legal & Privacy',
+              onPressed: () => showHomeLegalMenu(context),
+            ),
+          ),
+          Semantics(
+            label: '設定（ログイン・ログアウト）を開く',
+            button: true,
+            child: IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: '設定',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const HomeAccountSettingsPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFF8B5CF6).withOpacity(0.3),
+                const Color(0xFF06B6D4).withOpacity(0.2),
+                const Color(0xFF0A0E1A),
+              ],
+            ),
+          ),
+        ),
       ),
+      body: stack,
     );
     return E2E.isEnabled ? Semantics(label: 'e2e-home-ready', child: body) : body;
+  }
+}
+
+/// チュートリアルで定めた柱のキャラ画像と、性格データ上の特徴を表示
+class _TutorialPillarHomeCard extends StatelessWidget {
+  const _TutorialPillarHomeCard({
+    required this.deity,
+    this.detail,
+  });
+
+  final Deity deity;
+  final PersonalityTypeDetail? detail;
+
+  String get _characterAsset {
+    final p = detail?.characterImage;
+    if (p != null && p.trim().isNotEmpty) {
+      return p;
+    }
+    return 'assets/characters/${deity.id}.png';
+  }
+
+  String get _pillarLabel {
+    final t = detail?.pillarTitle;
+    if (t != null && t.trim().isNotEmpty) {
+      return t;
+    }
+    return deity.role;
+  }
+
+  String _featureExcerpt() {
+    final core = detail?.sections['core']?.content;
+    if (core != null && core.trim().isNotEmpty) {
+      return _truncateFeature(core, 360);
+    }
+    final intro = detail?.sections['intro']?.content;
+    if (intro != null && intro.trim().isNotEmpty) {
+      return _truncateFeature(intro, 360);
+    }
+    return '${deity.role}。${deity.shortMessage}';
+  }
+
+  String _truncateFeature(String s, int maxChars) {
+    var t = s.trim();
+    t = t.replaceAll('\r\n', '\n');
+    if (t.length <= maxChars) {
+      return t;
+    }
+    final cut = t.substring(0, maxChars);
+    final nl = cut.lastIndexOf('\n\n');
+    if (nl > 100) {
+      return '${cut.substring(0, nl).trim()}\n\n…';
+    }
+    final period = cut.lastIndexOf('。');
+    if (period > 120) {
+      return '${cut.substring(0, period + 1)}\n\n…';
+    }
+    return '$cut…';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Color(int.parse(deity.colorHex.replaceFirst('#', '0xff')));
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: accent.withValues(alpha: 0.5), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.2),
+            blurRadius: 20,
+            spreadRadius: 0,
+          ),
+        ],
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            accent.withValues(alpha: 0.2),
+            Colors.black.withValues(alpha: 0.5),
+            const Color(0xFF0A0E1A).withValues(alpha: 0.9),
+          ],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+            child: Container(
+              // 縦長のキャラ画像でも「全体が見える」ように cover ではなく contain を採用。
+              // 余白が出る場合は背景に薄い黒を敷いて見栄えを安定させる。
+              color: Colors.black.withValues(alpha: 0.28),
+              constraints: const BoxConstraints(minHeight: 200),
+              child: Image.asset(
+                _characterAsset,
+                fit: BoxFit.contain,
+                alignment: Alignment.topCenter,
+                errorBuilder: (_, __, ___) => Container(
+                  color: Colors.black38,
+                  alignment: Alignment.center,
+                  child: Image.asset(
+                    deity.symbolAsset,
+                    fit: BoxFit.contain,
+                    width: 120,
+                    height: 120,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'あなたの柱',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.white.withValues(alpha: 0.65),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '【${deity.nameJa}】$_pillarLabel',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: accent,
+                    height: 1.25,
+                  ),
+                ),
+                if (detail != null && (detail!.typeName.isNotEmpty)) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    detail!.typeName,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '特徴',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: accent.withValues(alpha: 0.9),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _featureExcerpt(),
+                  style: TextStyle(
+                    fontSize: 14,
+                    height: 1.55,
+                    color: Colors.white.withValues(alpha: 0.88),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -803,93 +846,6 @@ class _CurrencyItem extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _MainActionCard extends StatelessWidget {
-  final VoidCallback onPressed;
-  final Color deityColor;
-
-  const _MainActionCard({
-    required this.onPressed,
-    required this.deityColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: '写真を撮る。顔写真から診断を開始します。',
-      hint: 'ダブルタップで実行',
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              deityColor.withOpacity(0.3),
-              deityColor.withOpacity(0.2),
-              const Color(0xFF6C63FF).withOpacity(0.3),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: deityColor.withOpacity(0.5),
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: deityColor.withOpacity(0.4),
-              blurRadius: 30,
-              spreadRadius: 5,
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onPressed,
-            borderRadius: BorderRadius.circular(20),
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.camera_alt,
-                      size: 40,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    '写真を撮る / アップロード',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '顔写真から神が降臨',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.8),
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

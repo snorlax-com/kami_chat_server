@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' if (dart.library.html) 'package:kami_face_oracle/core/io_stub.dart' as io;
@@ -9,11 +9,13 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path_lib;
 import '../../utils/preview_transform.dart';
 import '../../widgets/face_overlay_painter.dart';
 import '../../skin_analysis.dart';
+import 'package:kami_face_oracle/core/portrait_lock.dart';
 import 'package:kami_face_oracle/services/skin_analysis_service.dart';
 import '../../feature/tutorial/device_pose_gate.dart';
 import '../../feature/tutorial/tutorial_guidance_overlay.dart';
@@ -64,6 +66,13 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
 
   bool _streaming = false;
   bool _detecting = false;
+  bool _cameraInitInProgress = false;
+  bool _didPrewarmCameraService = false;
+  bool _justGrantedCameraPermission = false;
+
+  /// カメラ初期化の多重実行（権限ダイアログで paused→resumed など）を直列化する
+  Future<void> _cameraInitChain = Future.value();
+  int _cameraInitSerial = 0;
 
   List<Face> _faces = [];
   Size? _lastImageSize;
@@ -75,6 +84,7 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
   int _stableFrameCount = 0;
   static const int _requiredStableFrames = 5; // さらに緩和: 8 → 5
   bool _capturing = false;
+  bool _autoRetryScheduled = false;
 
   // Web 向け MediaPipe 自動シャッター
   bool _webShutterReady = false;
@@ -112,16 +122,15 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // 画面の向きを縦向きに固定（E2E時もdisposeで解除するためここで設定）
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
+    unawaited(lockPortraitOrientation());
 
     _poseGate = DevicePoseGate(
       gyroStillThreshold: 0.30,
       gyroStableRequiredFrames: 3,
       pitchThresholdDeg: 20.0,
       rollThresholdDeg: 20.0,
+      // 初回インストール直後はセンサイベントが遅れ、静止判定だけで自動シャッターが詰まりやすい
+      sensorWarmUp: const Duration(milliseconds: 1500),
     );
     _poseGate.start();
 
@@ -148,7 +157,13 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
       _webSimpleController = WebCameraController();
     }
     if (!kIsWeb) {
-      _init();
+      // インストール直後や権限ダイアログ直後は camera service が不安定になりやすい。
+      // 初回は少し遅らせてから初期化すると「1回目で真っ黒」を減らせる。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future<void>.delayed(const Duration(milliseconds: 1100), () {
+          if (mounted) _init();
+        });
+      });
     }
   }
 
@@ -173,13 +188,7 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
     _controller = null;
     unawaited(_safeDisposeCamera(cam));
     _detector.close();
-    // 画面の向きの固定を解除
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    unawaited(lockPortraitOrientation());
     super.dispose();
   }
 
@@ -188,7 +197,8 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
       // 撮影直後〜サーバー診断完了まで inactive になり得る。ここでカメラを捨てると
       // build が「未初期化」分支になり真っ白な Scaffold だけが表示され、戻るも効かないように見える。
-      if (!kIsWeb && _capturing) {
+      // また、初回の権限ダイアログ表示中（init中）に dispose すると「1回目だけ起動できない」を誘発する。
+      if (!kIsWeb && (_capturing || _cameraInitInProgress)) {
         debugPrint('[TUTORIAL_CAM] lifecycle $state during capture/processing — keep camera');
         return;
       }
@@ -200,7 +210,17 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
       _controller = null;
       unawaited(_safeDisposeCamera(cam));
     } else if (state == AppLifecycleState.resumed) {
-      if (!kIsWeb) _init();
+      if (!kIsWeb) {
+        // 権限ダイアログから戻った直後は camera service が不安定になりやすいので少し待ってから再初期化
+        if (_justGrantedCameraPermission) {
+          _justGrantedCameraPermission = false;
+          Future<void>.delayed(const Duration(milliseconds: 900), () {
+            if (mounted) _init();
+          });
+        } else {
+          _init();
+        }
+      }
     }
   }
 
@@ -448,53 +468,201 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
     }
   }
 
-  Future<void> _init() async {
-    debugPrint('[TUTORIAL_CAM] init start');
-    final cams = await availableCameras();
-    final front = cams.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.front,
-      orElse: () => cams.first,
-    );
+  Future<void> _init() {
+    if (kIsWeb) return Future.value();
+    _cameraInitChain = _cameraInitChain.then((_) async {
+      await _initCameraOnce();
+    }).catchError((Object e, StackTrace st) {
+      debugPrint('[TUTORIAL_CAM] init chain error: $e\n$st');
+    });
+    return _cameraInitChain;
+  }
 
-    // Web では低解像度で初期化を試行（成功率向上）
-    final resolution = kIsWeb ? ResolutionPreset.low : ResolutionPreset.medium;
-    final c = CameraController(
-      front,
-      resolution,
-      enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.yuv420,
-    );
+  Future<void> _initCameraOnce() async {
+    final token = ++_cameraInitSerial;
+    debugPrint('[TUTORIAL_CAM] init start token=$token');
+    CameraController? pending;
+    _cameraInitInProgress = true;
 
     try {
-      await c.initialize();
+      // 権限がない状態で availableCameras/initialize を呼ぶと端末によっては無言で失敗して
+      // プレビューが真っ黒に見えることがあるため、先に明示的にリクエストする。
+      final st = await PermissionService.instance.cameraStatus;
+      if (!mounted || token != _cameraInitSerial) return;
+      if (st != PermissionStatus.granted) {
+        final req = await PermissionService.instance.requestCamera();
+        if (!mounted || token != _cameraInitSerial) return;
+        if (req != PermissionStatus.granted) {
+          if (mounted) {
+            setState(() {
+              _guidanceSub = 'カメラの許可が必要です。設定からカメラを許可してください。';
+            });
+            Future.delayed(Duration.zero, () {
+              if (!mounted) return;
+              PermissionService.showOpenSettingsDialog(context);
+            });
+          }
+          return;
+        }
+        // 権限が付与された直後はこの init を続行せず、resume 後に安定待ちしてから再初期化する
+        _justGrantedCameraPermission = true;
+        return;
+      }
+
+      // 権限許可直後は端末（特に ColorOS）で camera service が不安定なことがあるので少し待つ
+      await Future.delayed(const Duration(milliseconds: 900));
+      if (!mounted || token != _cameraInitSerial) return;
+
+      final cams = await availableCameras();
+      if (!mounted || token != _cameraInitSerial) return;
+
+      final resolution = kIsWeb ? ResolutionPreset.low : ResolutionPreset.medium;
+
+      // 解決策1: camera service のウォームアップ（背面を低解像度で一瞬 initialize→dispose）
+      // 起動直後の「Camera service is unavailable」を減らすため、最初の1回だけ実行。
+      if (!_didPrewarmCameraService) {
+        _didPrewarmCameraService = true;
+        try {
+          final warmCam = cams.firstWhere(
+            (c) => c.lensDirection == CameraLensDirection.back,
+            orElse: () => cams.first,
+          );
+          final warmer = CameraController(
+            warmCam,
+            ResolutionPreset.low,
+            enableAudio: false,
+          );
+          await warmer.initialize();
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+          await warmer.dispose();
+          await Future<void>.delayed(const Duration(milliseconds: 120));
+          if (!mounted || token != _cameraInitSerial) return;
+          debugPrint('[TUTORIAL_CAM] prewarm ok lens=${warmCam.lensDirection} name=${warmCam.name}');
+        } catch (e) {
+          debugPrint('[TUTORIAL_CAM] prewarm failed (ignored): $e');
+        }
+      }
+
+      // ColorOS などで front camera が unavailable のことがあるので、
+      // front → back → その他の順に初期化を試す。
+      final List<CameraDescription> preferred = [
+        ...cams.where((c) => c.lensDirection == CameraLensDirection.front),
+        ...cams.where((c) => c.lensDirection == CameraLensDirection.back),
+        ...cams.where((c) => c.lensDirection != CameraLensDirection.front && c.lensDirection != CameraLensDirection.back),
+      ];
+
+      Object? lastInitError;
+      for (final cam in preferred) {
+        // 1台のカメラに対して数回リトライ
+        for (int attempt = 0; attempt < 5; attempt++) {
+          try {
+            pending = CameraController(
+              cam,
+              resolution,
+              enableAudio: false,
+            );
+            await pending!.initialize();
+            lastInitError = null;
+            debugPrint('[TUTORIAL_CAM] init ok lens=${cam.lensDirection} name=${cam.name}');
+            break;
+          } catch (e) {
+            lastInitError = e;
+            try {
+              await pending?.dispose();
+            } catch (_) {}
+            pending = null;
+            debugPrint(
+              '[TUTORIAL_CAM] init failed lens=${cam.lensDirection} attempt ${attempt + 1}/5: $e',
+            );
+            // camera service unavailable は短時間で復帰することが多いので、初回は長めに待つ
+            final msg = e.toString();
+            final extra = msg.contains('Camera service is unavailable') ? 700 : 0;
+            await Future.delayed(Duration(milliseconds: 650 + attempt * 520 + extra));
+            if (!mounted || token != _cameraInitSerial) return;
+          }
+        }
+        if (pending != null) break; // 初期化成功
+      }
+      if (pending == null && lastInitError != null) throw lastInitError;
+      if (!mounted || token != _cameraInitSerial) {
+        await pending!.dispose();
+        return;
+      }
+
+      final c = pending!;
+      pending = null;
+      _autoRetryScheduled = false;
+
+      await _stopStream();
+      final old = _controller;
       _controller = c;
+      if (old != null && !identical(old, c)) {
+        await _safeDisposeCamera(old);
+      }
+
+      if (!mounted || token != _cameraInitSerial) {
+        _controller = null;
+        await _safeDisposeCamera(c);
+        return;
+      }
+
       if (mounted) setState(() {});
       debugPrint('[TUTORIAL_CAM] init ok previewSize=${c.value.previewSize}');
+
+      // 別コントローラへ差し替えたのに _streaming だけ true のままだと startImageStream に入れない
+      _streaming = false;
       await _startStream();
     } catch (e, stack) {
+      try {
+        if (pending != null && !identical(_controller, pending)) {
+          await pending.dispose();
+        }
+      } catch (_) {}
       debugPrint('[TUTORIAL_CAM] init failed: $e');
       debugPrint('[TUTORIAL_CAM] stack: ${stack?.toString().split("\n").take(5).join("\n")}');
       if (mounted) {
         setState(() {
-          _guidanceSub = kIsWeb ? 'カメラ初期化に失敗しました。Webでは「画像をアップロード」をご利用ください。' : 'カメラ初期化に失敗しました。権限と接続を確認してください。';
+          final s = e.toString();
+          if (s.contains('Camera service is unavailable')) {
+            _guidanceSub = '端末のカメラサービスが一時的に利用できません。'
+                '他のカメラアプリを閉じて、少し待ってから「再試行」を押してください。';
+          } else {
+            _guidanceSub = kIsWeb
+                ? 'カメラ初期化に失敗しました。Webでは「画像をアップロード」をご利用ください。'
+                : 'カメラ初期化に失敗しました。権限と接続を確認してください。';
+          }
         });
-        if (!kIsWeb) {
-          Future.delayed(Duration.zero, () {
-            if (!mounted) return;
-            PermissionService.showOpenSettingsDialog(
-              context,
-              title: 'カメラの使用許可が必要です',
-              message: '設定から「Kami Face Oracle」のカメラを許可してください。',
-            );
-          });
-        }
+        // 権限以外のエラーもあり得るため、ここでは設定ダイアログは強制せず、画面内の「設定を開く」へ誘導する。
       }
+
+      // 1回目だけ失敗→2回目で成功、を自動化する（camera service unavailable は短時間で復帰することが多い）
+      final s = e.toString();
+      if (!_autoRetryScheduled && s.contains('Camera service is unavailable')) {
+        _autoRetryScheduled = true;
+        Future<void>.delayed(const Duration(milliseconds: 1400), () {
+          if (!mounted) return;
+          // まだプレビューが出ていなければ再初期化
+          if (_controller == null || !_controller!.value.isInitialized) {
+            debugPrint('[TUTORIAL_CAM] auto-retry init after camera service unavailable');
+            _init();
+          }
+        });
+      }
+    } finally {
+      _cameraInitInProgress = false;
     }
   }
 
   Future<void> _startStream() async {
     final c = _controller;
-    if (c == null || _streaming) return;
+    if (c == null) return;
+    // 競合で _controller だけ新しいのに _streaming が true のまま残ると、ここで return して
+    // 画像ストリームが始まらず自動シャッターが一切動かない（初回のみ再現しやすい）。
+    if (_streaming && !c.value.isStreamingImages) {
+      debugPrint('[TUTORIAL_CAM] reset stale _streaming before startImageStream');
+      _streaming = false;
+    }
+    if (_streaming) return;
     _streaming = true;
 
     debugPrint('[TUTORIAL_CAM] startImageStream called');
@@ -931,14 +1099,25 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
     try {
       debugPrint('[AUTO_SHOT] FIRE');
       await _stopStream(); // 機種差対策
-      final xFile = await c.takePicture();
-      if (kIsWeb) {
-        final bytes = await xFile.readAsBytes();
-        final filename = xFile.name ?? 'tutorial_${widget.currentStep}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        await _onCapturedBytes(bytes, filename);
-      } else {
-        await _onCaptured(xFile.path);
+      // ストリーム停止直後の takePicture は失敗・0byte・壊れたJPEGになりやすい（初回撮影で多い）
+      await Future.delayed(const Duration(milliseconds: 160));
+      XFile xFile;
+      try {
+        xFile = await c.takePicture();
+      } catch (e) {
+        debugPrint('[AUTO_SHOT] takePicture 1回目失敗、再試行: $e');
+        await Future.delayed(const Duration(milliseconds: 280));
+        xFile = await c.takePicture();
       }
+      final bytes = await xFile.readAsBytes();
+      if (bytes.isEmpty) {
+        throw Exception('撮影データが空です');
+      }
+      debugPrint('[AUTO_SHOT] JPEG bytes=${bytes.length}');
+      final filename =
+          xFile.name.isNotEmpty ? xFile.name : 'tutorial_${widget.currentStep}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      // モバイルは _onCapturedBytes（Android は一時 JPEG + fromFilePath、iOS は BGRA）に委譲
+      await _onCapturedBytes(bytes, filename);
       if (mounted) await _startStream();
     } catch (e) {
       debugPrint('[AUTO_SHOT] capture failed: $e');
@@ -950,132 +1129,6 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
     }
   }
 
-  Future<void> _onCaptured(String path) async {
-    if (!mounted) return;
-
-    setState(() {
-      _capturing = true;
-    });
-
-    try {
-      final imageFile = io.File(path);
-
-      // ファイルを保存
-      final directory = await getApplicationDocumentsDirectory();
-      final fileName = 'tutorial_${widget.currentStep}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final filePath = path_lib.join(directory.path, fileName);
-      final targetFile = io.File(filePath);
-      await imageFile.copy(targetFile.path);
-
-      // 顔検出を再実行（高精度モード）
-      final inputImage = InputImage.fromFilePath(targetFile.path);
-      final options = FaceDetectorOptions(
-        enableContours: true,
-        enableLandmarks: true,
-        enableClassification: true,
-        enableTracking: false,
-        minFaceSize: 0.05,
-        performanceMode: FaceDetectorMode.accurate, // 高精度モード
-      );
-      final accurateDetector = FaceDetector(options: options);
-      final faces = await accurateDetector.processImage(inputImage);
-      await accurateDetector.close();
-
-      if (faces.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('顔が検出されませんでした。もう一度撮影してください')),
-          );
-          await _startStream();
-          setState(() {
-            _capturing = false;
-          });
-        }
-        return;
-      }
-
-      // 肌分析（【B】SkinAnalysisService経由で実行）
-      final skinResult = await SkinAnalysisService().analyzeSkin(targetFile, faces.first);
-
-      // 性格診断を実行
-      final personalityResult = await runDiagnosis(targetFile);
-
-      // チュートリアル用の神を保存
-      try {
-        final detail = await PersonalityTypeDetailService.getDetail(personalityResult.personalityType);
-        if (detail != null) {
-          final pillarId = detail.pillarId.toLowerCase();
-          final actualGod = deities.firstWhere(
-            (d) => d.id.toLowerCase() == pillarId,
-            orElse: () => deities.first,
-          );
-          await Storage.saveTutorialDeity(actualGod.id);
-        }
-      } catch (e) {
-        debugPrint('[TutorialCameraPage] チュートリアル神の保存エラー: $e');
-      }
-
-      // 簡易特徴量
-      final face = faces.first;
-      final smile = face.smilingProbability ?? 0.5;
-      final eyeOpen = ((face.leftEyeOpenProbability ?? 0.5) + (face.rightEyeOpenProbability ?? 0.5)) / 2.0;
-      final gloss = skinResult.brightness.clamp(0.0, 1.0);
-      double straightness = 0.5;
-      final faceContour = face.contours[FaceContourType.face];
-      if (faceContour != null && faceContour.points.length >= 3) {
-        final pts = faceContour.points;
-        final a = pts.first;
-        final b = pts[pts.length ~/ 2];
-        final c = pts.last;
-        double dist(ax, ay, bx, by) => math.sqrt(math.pow(ax - bx, 2) + math.pow(ay - by, 2));
-        final ab = dist(a.x.toDouble(), a.y.toDouble(), b.x.toDouble(), b.y.toDouble());
-        final bc = dist(b.x.toDouble(), b.y.toDouble(), c.x.toDouble(), c.y.toDouble());
-        final ac = dist(a.x.toDouble(), a.y.toDouble(), c.x.toDouble(), c.y.toDouble());
-        final detour = (ab + bc) / (ac + 1e-6);
-        straightness = (2 - detour).clamp(0.0, 1.0);
-      }
-      final claim = 0.5;
-      final features = FaceFeatures(smile.clamp(0.0, 1.0), eyeOpen.clamp(0.0, 1.0), gloss, straightness, claim);
-
-      if (!mounted) return;
-
-      // RevealPageに遷移（画像パスと顔検出結果を渡す）
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => RevealPage(
-            god: null,
-            features: features,
-            skin: skinResult,
-            beautyScore: null,
-            praise: personalityResult.personalityDescription,
-            isTutorial: true,
-            deityMeta: {
-              'title': personalityResult.personalityTypeName,
-              'trait': personalityResult.personalityDescription,
-              'message': personalityResult.personalityDescription,
-            },
-            personalityDiagnosisResult: personalityResult,
-            tutorialImagePath: targetFile.path, // 画像パスを渡す
-            tutorialDetectedFaces: faces, // 顔検出結果を渡す
-          ),
-        ),
-      );
-    } catch (e, stackTrace) {
-      debugPrint('[TutorialCameraPage] 画像処理エラー: $e');
-      debugPrint('[TutorialCameraPage] スタックトレース: ${stackTrace.toString().split("\n").take(10).join("\n")}');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('処理中にエラーが発生しました: $e')),
-        );
-        await _startStream();
-        setState(() {
-          _capturing = false;
-        });
-      }
-    }
-  }
-
   /// Web／bytes 用: 自動シャッター後の処理（パスを使わない）
   /// Web では ML Kit は使わず、正面判定はサーバー /validate_face（MediaPipe）のみ。ここでは診断実行と結果表示のみ。
   Future<void> _onCapturedBytes(Uint8List bytes, String filename) async {
@@ -1083,6 +1136,7 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
     setState(() {
       _capturing = true;
     });
+    String? androidTutorialFaceTemp;
     try {
       // Web: ML Kit を使わない。サーバーが MediaPipe で正面判定済み（またはスキップ）なので、診断のみ実行する。
       if (kIsWeb) {
@@ -1146,44 +1200,69 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
         return;
       }
 
-      // モバイル: ML Kit で顔検出し、肌分析・診断・結果表示
-      final codec = await instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      final uiImage = frame.image;
-      final byteData = await uiImage.toByteData(format: ImageByteFormat.rawRgba);
-      if (byteData == null) throw Exception('画像のバイトデータ変換に失敗しました');
-      final rgba = byteData.buffer.asUint8List();
-      final bgra = Uint8List.fromList(rgba);
-      for (int i = 0; i < bgra.length; i += 4) {
-        if (i + 3 < bgra.length) {
-          final r = bgra[i];
-          bgra[i] = bgra[i + 2];
-          bgra[i + 2] = r;
+      // モバイル: ML Kit で顔検出（Android は BGRA fromBytes 非対応のため一時 JPEG + fromFilePath）
+      late final InputImage inputImage;
+      late final int imgW;
+      late final int imgH;
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        androidTutorialFaceTemp = await getTempImagePathFromBytes(bytes);
+        if (androidTutorialFaceTemp == null) {
+          throw Exception('一時画像の作成に失敗しました');
         }
+        inputImage = InputImage.fromFilePath(androidTutorialFaceTemp);
+        final dimCodec = await instantiateImageCodec(bytes);
+        final dimFrame = await dimCodec.getNextFrame();
+        imgW = dimFrame.image.width;
+        imgH = dimFrame.image.height;
+        dimFrame.image.dispose();
+      } else {
+        final codec = await instantiateImageCodec(bytes);
+        final frame = await codec.getNextFrame();
+        final uiImage = frame.image;
+        final byteData = await uiImage.toByteData(format: ImageByteFormat.rawRgba);
+        if (byteData == null) throw Exception('画像のバイトデータ変換に失敗しました');
+        final src = byteData.buffer.asUint8List(byteData.offsetInBytes, byteData.lengthInBytes);
+        final bgra = Uint8List(src.length);
+        for (int i = 0; i < src.length; i += 4) {
+          bgra[i] = src[i + 2];
+          bgra[i + 1] = src[i + 1];
+          bgra[i + 2] = src[i];
+          bgra[i + 3] = src[i + 3];
+        }
+        imgW = uiImage.width;
+        imgH = uiImage.height;
+        inputImage = InputImage.fromBytes(
+          bytes: bgra,
+          metadata: InputImageMetadata(
+            size: Size(imgW.toDouble(), imgH.toDouble()),
+            rotation: InputImageRotation.rotation0deg,
+            format: InputImageFormat.bgra8888,
+            bytesPerRow: imgW * 4,
+          ),
+        );
+        uiImage.dispose();
       }
-      final inputImage = InputImage.fromBytes(
-        bytes: bgra,
-        metadata: InputImageMetadata(
-          size: Size(uiImage.width.toDouble(), uiImage.height.toDouble()),
-          rotation: InputImageRotation.rotation0deg,
-          format: InputImageFormat.bgra8888,
-          bytesPerRow: uiImage.width * 4,
-        ),
-      );
-      uiImage.dispose();
-      final accurateDetector = FaceDetector(
-        options: FaceDetectorOptions(
-          enableContours: true,
-          enableLandmarks: true,
-          enableClassification: true,
-          enableTracking: false,
-          minFaceSize: 0.05,
-          performanceMode: FaceDetectorMode.accurate,
-        ),
-      );
-      final faces = await accurateDetector.processImage(inputImage);
+      FaceDetector buildDetector(FaceDetectorMode mode) => FaceDetector(
+            options: FaceDetectorOptions(
+              enableContours: true,
+              enableLandmarks: true,
+              enableClassification: true,
+              enableTracking: false,
+              minFaceSize: 0.05,
+              performanceMode: mode,
+            ),
+          );
+      var accurateDetector = buildDetector(FaceDetectorMode.accurate);
+      var faces = await accurateDetector.processImage(inputImage);
       await accurateDetector.close();
       if (faces.isEmpty) {
+        debugPrint('[TutorialCameraPage] accurate顔検出0件、fastで再試行（初回JPEG取りこぼし対策）');
+        final fastDet = buildDetector(FaceDetectorMode.fast);
+        faces = await fastDet.processImage(inputImage);
+        await fastDet.close();
+      }
+      if (faces.isEmpty) {
+        debugPrint('[TutorialCameraPage] 再試行後も顔0件 image=${imgW}x$imgH bytes=${bytes.length}');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('顔が検出されませんでした。もう一度撮影してください')),
@@ -1195,7 +1274,7 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
         }
         return;
       }
-      final path = await getTempImagePathFromBytes(bytes);
+      final path = androidTutorialFaceTemp ?? await getTempImagePathFromBytes(bytes);
       final SkinAnalysisResult skinResult;
       if (path != null) {
         skinResult = await SkinAnalysisService().analyzeSkin(io.File(path), faces.first);
@@ -1305,6 +1384,12 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
         });
       }
     } finally {
+      final t = androidTutorialFaceTemp;
+      if (t != null) {
+        try {
+          await io.File(t).delete();
+        } catch (_) {}
+      }
       if (mounted) {
         setState(() {
           _capturing = false;
@@ -1830,6 +1915,35 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
                     style: const TextStyle(color: Colors.white70, fontSize: 15, height: 1.45),
                   ),
                 ),
+                if (!_capturing && _guidanceSub != null) ...[
+                  const SizedBox(height: 14),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                    child: Text(
+                      _guidanceSub!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () => _init(),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('再試行'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => PermissionService.showOpenSettingsDialog(context),
+                        icon: const Icon(Icons.settings),
+                        label: const Text('設定を開く'),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

@@ -11,7 +11,7 @@ import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/services/consultation_mail_new_send.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
-import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
+import 'package:kami_face_oracle/services/bridge_thread_local_store.dart';
 import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
 import 'package:kami_face_oracle/services/consultation_identity.dart';
 
@@ -99,6 +99,8 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
 
   Future<void> _send({required bool urgent, required int coinCost, int? gemCost}) async {
     if (_controller.text.trim().isEmpty) return;
+    final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
+    if (fbUser == null) return;
     final trimmedBody = _controller.text.trim();
     final bodyText =
         AuraFaceChatMailService.applyNewUrgentConsultationPrefix(urgent: urgent, message: trimmedBody);
@@ -190,6 +192,12 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
         mailSent = mailRes.mailSent;
         if (mailRes.success) {
           await DeveloperChatPref.setActiveChatId(chatId, consultationType: mailCt);
+          await BridgeThreadLocalStore.appendUserMessage(
+            chatId: chatId,
+            text: bodyText,
+            consultationType: mailCt,
+            messageId: mailRes.messageId,
+          );
         }
         if (mounted && mailRes.success && mailRes.mailSent == false) {
           final detail = mailRes.mailError != null && mailRes.mailError!.isNotEmpty
@@ -317,15 +325,6 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
               ],
             ),
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.email_outlined, size: 20),
-              label: const Text('開発者にメールで相談（Gmail通知・返信が届く）'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ConsultationMailBridgeTestPage()),
-              ),
-            ),
-            const SizedBox(height: 16),
 
             // チャット表示エリア
             if (_messages.isNotEmpty) ...[

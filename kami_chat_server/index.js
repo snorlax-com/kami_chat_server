@@ -7,6 +7,7 @@ const urgentReception = require("./config/urgentReception");
 const { verifyToken } = require("./token");
 const identityRoutes = require("./identityRoutes");
 const idb = require("./identityDb");
+const { sendDeveloperReplyPush } = require("./push/sendDeveloperReplyPush");
 const {
   tryInitFirebaseAdmin,
   isFirebaseConfigured,
@@ -200,6 +201,16 @@ app.post("/api/chat/send", async (req, res) => {
     }
 
     const bridgeUserId = String((body || {}).userId || "").trim();
+    const fcmToken = String((body || {}).fcmToken || "").trim();
+    const fcmPlatform = String((body || {}).fcmPlatform || "android").trim().slice(0, 16);
+    if (bridgeUserId && fcmToken) {
+      try {
+        idb.upsertFcmDeviceToken(bridgeUserId, fcmToken, fcmPlatform);
+        console.log("[chat/send] fcm_token_saved", { userId: bridgeUserId, platform: fcmPlatform });
+      } catch (fcmErr) {
+        console.error("[chat/send] fcm_token_save_failed", fcmErr);
+      }
+    }
     if (bridgeUserId && cid) {
       try {
         idb.upsertChatThread({
@@ -291,7 +302,7 @@ app.get("/api/chat/thread", (req, res) => {
 });
 
 // テスト用: 開発者返信を追加
-app.post("/api/chat/dev-reply", (req, res) => {
+app.post("/api/chat/dev-reply", async (req, res) => {
   pruneChatMessagesInStore();
   const { chatId, text } = req.body || {};
   const cid = chatId || "default";
@@ -309,7 +320,14 @@ app.post("/api/chat/dev-reply", (req, res) => {
     console.error("[chat/dev-reply] bumpThreadLastMessageAtMs", e);
   }
   console.log("[chat/dev-reply]", { chatId: cid, text: msg });
-  res.json({ status: "received", chatId: cid, messageId: id });
+  let push = { skipped: true, reason: "pending" };
+  try {
+    push = await sendDeveloperReplyPush({ chatId: cid, messageId: id, role: "dev" });
+  } catch (e) {
+    console.error("[chat/dev-reply] push failed", e);
+    push = { ok: false, error: String(e.message || e) };
+  }
+  res.json({ status: "received", chatId: cid, messageId: id, push });
 });
 
 // --- GET /admin/reply（メモリストア + トークン）
@@ -399,7 +417,7 @@ app.get("/admin/reply", (req, res) => {
 });
 
 // --- POST /admin/reply
-app.post("/admin/reply", (req, res) => {
+app.post("/admin/reply", async (req, res) => {
   try {
     pruneChatMessagesInStore();
     const { chatId, token, expires, message, consultationType: bodyConsultationType } = req.body || {};
@@ -427,6 +445,12 @@ app.post("/admin/reply", (req, res) => {
     }
 
     console.log("[admin/reply POST] saved dev message", { chatId, len: text.length });
+    try {
+      const push = await sendDeveloperReplyPush({ chatId, messageId: id, role: "dev" });
+      console.log("[admin/reply POST] push", push);
+    } catch (e) {
+      console.error("[admin/reply POST] push failed", e);
+    }
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(`
       <!DOCTYPE html>

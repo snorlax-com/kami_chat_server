@@ -2,6 +2,7 @@ package com.auraface.kami_face_oracle
 
 import android.content.ContentResolver
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -20,8 +21,14 @@ class MainActivity : FlutterActivity() {
     private var latestIntent: Intent? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         super.onCreate(savedInstanceState)
         latestIntent = intent
+    }
+
+    override fun onResume() {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        super.onResume()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

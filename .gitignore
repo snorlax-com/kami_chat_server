@@ -1,63 +1,4 @@
 # Miscellaneous
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-
-# IntelliJ / Android Studio
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# Flutter / Dart
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-build/
-coverage/
-
-# Firebase (API keys; keep local or use CI secrets)
-android/app/google-services.json
-
-# CocoaPods
-ios/Pods/
-
-# Gradle
-android/.gradle/
-
-# Node
-node_modules/
-**/node_modules/
-
-# Local databases / env
-*.sqlite
-*.db
-.env
-**/.env
-
-# Test artifacts / logs
-debug_logs/
-logs/
-output/
-e2e/test-results/
-e2e/playwright-report/
-e2e/blob-report/
-e2e/playwright/.cache/
-
-# Local backups / generated platform folders (keep out of git)
-github_chat_minimal/
-macos/
-macos_backup_*/
-
-# Miscellaneous
 debug_logcat_filtered.txt
 debug_logcat_pid.txt
 *.class
@@ -119,3 +60,10 @@ e2e/playwright/.cache/
 ios/Pods/
 android/.gradle/
 node_modules/
+
+# Local secrets and runtime data
+auraface-chat-mail-bridge/.env
+auraface-chat-mail-bridge/data.sqlite
+kami_chat_server/data/
+macos_backup_*/
+github_chat_minimal/

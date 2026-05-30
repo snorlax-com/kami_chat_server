@@ -37,9 +37,8 @@ class _TutorialIntroPageState extends State<TutorialIntroPage> {
   void initState() {
     super.initState();
     _loadDescendedPillar();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializeVideo();
-    });
+    // チュートリアル起動直後に動画を流したいので、フレーム待ちせず初期化を開始する
+    unawaited(_initializeVideo());
   }
 
   /// 降臨した柱の情報を読み込む
@@ -72,78 +71,43 @@ class _TutorialIntroPageState extends State<TutorialIntroPage> {
     try {
       const videoPath = 'assets/videos/opening_animation.mp4';
 
-      print('[TutorialIntroPage] 🎬 動画の初期化を開始: $videoPath');
-
-      // ファイルの存在を確認
-      try {
-        await DefaultAssetBundle.of(context).load(videoPath);
-        print('[TutorialIntroPage] ✅ 動画ファイルが見つかりました');
-      } catch (e) {
-        print('[TutorialIntroPage] ❌ 動画ファイルが見つかりません: $videoPath');
-        print('[TutorialIntroPage] エラー詳細: $e');
-        // 動画がなくても続行
-        if (mounted) {
-          setState(() {
-            _isVideoInitialized = false;
-          });
-        }
-        return;
-      }
-
-      print('[TutorialIntroPage] 📹 VideoPlayerControllerを作成中...');
+      // 余計な待ち（アセット存在チェック等）を入れると「準備中」が長く見えるため、
+      // 直接 VideoPlayerController を作成して最短で initialize→play する。
       _videoController = VideoPlayerController.asset(videoPath);
 
-      // 初期化を待つ（タイムアウトを30秒に延長）
-      print('[TutorialIntroPage] ⏳ 動画の初期化を待機中...');
+      // 初期化を待つ（長すぎるタイムアウトはユーザー体験を悪化させるため短めに）
       await _videoController!.initialize().timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 10),
         onTimeout: () {
-          print('[TutorialIntroPage] ⚠️ 動画の初期化がタイムアウトしました（30秒）');
           throw TimeoutException('動画の初期化がタイムアウトしました');
         },
       );
 
-      print('[TutorialIntroPage] 📊 動画情報:');
-      print('  - 初期化済み: ${_videoController!.value.isInitialized}');
-      print('  - アスペクト比: ${_videoController!.value.aspectRatio}');
-      print('  - 解像度: ${_videoController!.value.size}');
-      print('  - 長さ: ${_videoController!.value.duration}');
-
       if (!_videoController!.value.isInitialized) {
-        print('[TutorialIntroPage] ❌ 動画の初期化が完了しませんでした');
         throw Exception('動画の初期化が完了しませんでした');
       }
 
       // ループ再生を設定
-      print('[TutorialIntroPage] 🔁 ループ再生を設定中...');
       await _videoController!.setLooping(true);
 
       // 再生を開始
-      print('[TutorialIntroPage] ▶️ 動画の再生を開始...');
       await _videoController!.play();
-
-      // 再生状態を確認（少し待ってから）
-      await Future.delayed(const Duration(milliseconds: 500));
-      print('[TutorialIntroPage] 📊 再生状態: ${_videoController!.value.isPlaying}');
-      print('[TutorialIntroPage] 📊 再生位置: ${_videoController!.value.position}');
 
       if (mounted) {
         setState(() {
           _isVideoInitialized = true;
         });
-        print('[TutorialIntroPage] ✅ 動画の初期化と再生が完了しました');
       }
 
       // 再生が開始されていない場合は再試行
       if (!_videoController!.value.isPlaying) {
-        print('[TutorialIntroPage] ⚠️ 再生が開始されていません。再試行します...');
         await Future.delayed(const Duration(milliseconds: 500));
         await _videoController!.play();
-        print('[TutorialIntroPage] 📊 再試行後の再生状態: ${_videoController!.value.isPlaying}');
       }
     } catch (e, stackTrace) {
-      print('[TutorialIntroPage] ⚠️ 動画読み込みエラー: $e');
-      print('[TutorialIntroPage] スタックトレース: $stackTrace');
+      // 動画がなくてもチュートリアルは続行
+      debugPrint('[TutorialIntroPage] video init failed: $e');
+      debugPrint('[TutorialIntroPage] stack: ${stackTrace.toString().split("\n").take(4).join("\n")}');
       // 動画がなくても続行
       if (mounted) {
         setState(() {
@@ -165,7 +129,7 @@ class _TutorialIntroPageState extends State<TutorialIntroPage> {
         _currentStep++;
       });
     } else {
-      // 最後のステップ: 既存のチュートリアルへ
+      // 最後のステップ: 撮影フローへ進む（真顔 → カメラ説明 → 撮影）
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -204,27 +168,7 @@ class _TutorialIntroPageState extends State<TutorialIntroPage> {
                           ),
                         ),
                       )
-                    : Container(
-                        color: Colors.black,
-                        child: Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const CircularProgressIndicator(
-                                color: Colors.purple,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                '動画を準備しています…',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.7),
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                    : const SizedBox.expand(), // 「準備中」表示は出さない
               ),
             ),
 

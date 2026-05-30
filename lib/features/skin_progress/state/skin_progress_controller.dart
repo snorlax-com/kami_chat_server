@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
+import '../../../skin_analysis.dart';
 import '../data/skin_record_repository.dart';
 import '../data/skin_record_repository_hive.dart';
 import '../model/skin_daily_record.dart';
@@ -38,23 +39,45 @@ class SkinProgressController {
     final latest = current.isNotEmpty ? current.last : null;
     SkinDailyRecord make() {
       if (latest == null) {
+        final glow = rnd.nextInt(41) + 50;
+        final tone = rnd.nextInt(41) + 50;
+        final dullness = rnd.nextInt(41) + 30;
+        final texture = rnd.nextInt(41) + 45;
+        final dryness = rnd.nextInt(41) + 30;
+        final avg = (glow + tone + dryness) / 300.0;
+        final grade = skinConditionGradeFromAverage(avg);
         return SkinDailyRecord(
           date: today,
-          glow: rnd.nextInt(41) + 50,
-          tone: rnd.nextInt(41) + 50,
-          dullness: rnd.nextInt(41) + 30,
-          texture: rnd.nextInt(41) + 45,
-          dryness: rnd.nextInt(41) + 30,
+          glow: glow,
+          tone: tone,
+          dullness: dullness,
+          texture: texture,
+          dryness: dryness,
+          conditionGrade: grade,
+          glossPct: glow,
+          moisturePct: dryness,
+          bloodPct: tone,
         );
       }
       int jitter(int base) => clamp(base + (rnd.nextInt(11) - 5));
+      final glow = jitter(latest.glow);
+      final tone = jitter(latest.tone);
+      final dullness = jitter(latest.dullness);
+      final texture = jitter(latest.texture);
+      final dryness = jitter(latest.dryness);
+      final avg = (glow + tone + dryness) / 300.0;
+      final grade = skinConditionGradeFromAverage(avg);
       return SkinDailyRecord(
         date: today,
-        glow: jitter(latest.glow),
-        tone: jitter(latest.tone),
-        dullness: jitter(latest.dullness),
-        texture: jitter(latest.texture),
-        dryness: jitter(latest.dryness),
+        glow: glow,
+        tone: tone,
+        dullness: dullness,
+        texture: texture,
+        dryness: dryness,
+        conditionGrade: grade,
+        glossPct: glow,
+        moisturePct: dryness,
+        bloodPct: tone,
       );
     }
 

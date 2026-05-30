@@ -1,0 +1,18 @@
+{
+  "name": "auraface-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "npx playwright install chromium || true",
+    "e2e": "node run-e2e.js",
+    "e2e:ci": "node run-e2e.js --ci",
+    "e2e:emulator": "node run-e2e.js -- specs/emulator_flow.spec.js \"--project=iPhone 13\"",
+    "e2e:emulator:ui": "node run-e2e.js -- specs/emulator_flow.spec.js \"--project=iPhone 13\" --headed",
+    "e2e:personality": "node run-e2e.js -- specs/personality-flow.spec.js",
+    "e2e:personality:no-build": "node run-e2e.js --no-build -- specs/personality-flow.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "http-server": "^14.1.1"
+  }
+}

@@ -7,6 +7,31 @@ class PersonalityTypeDetailService {
   /// タイプIDごとにキャッシュ（単一スロットだと並行 getDetail で取り違えやすい）
   static final Map<int, PersonalityTypeDetail> _cache = {};
 
+  /// 柱ID（[PersonalityTypeDetail.pillarId]、例: shisaru）に対応する詳細を取得
+  static Future<PersonalityTypeDetail?> getDetailByPillarId(String pillarId) async {
+    final want = pillarId.toLowerCase();
+    for (final d in _cache.values) {
+      if (d.pillarId.toLowerCase() == want) {
+        return d;
+      }
+    }
+    try {
+      final jsonString = await rootBundle.loadString('assets/data/personality_type_details.json');
+      final jsonData = json.decode(jsonString) as Map<String, dynamic>;
+      for (final entry in jsonData.entries) {
+        final m = entry.value as Map<String, dynamic>;
+        final pid = (m['pillar_id'] as String? ?? '').toLowerCase();
+        if (pid == want) {
+          final typeId = int.parse(entry.key);
+          return getDetail(typeId);
+        }
+      }
+    } catch (e) {
+      print('[PersonalityTypeDetailService] getDetailByPillarId エラー: $e');
+    }
+    return null;
+  }
+
   /// 性格タイプの詳細情報を取得
   static Future<PersonalityTypeDetail?> getDetail(int typeId) async {
     final hit = _cache[typeId];

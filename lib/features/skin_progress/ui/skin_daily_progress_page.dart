@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../skin_analysis.dart';
+import '../model/skin_daily_record.dart';
 import '../state/skin_progress_controller.dart';
 import 'widgets/metric_ring_card.dart';
 import 'widgets/multi_metric_history_chart.dart';
@@ -35,6 +37,10 @@ class SkinDailyProgressPage extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              if (today != null) ...[
+                _TodaySkinConditionCard(record: today),
+                const SizedBox(height: 14),
+              ],
               // 上段：2カード（提示UIの "Steps / Weight" 風）
               Row(
                 children: [
@@ -120,6 +126,117 @@ class SkinDailyProgressPage extends ConsumerWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// その日の肌の調子（S/A/B/C）と艶・潤い・血色の内訳
+class _TodaySkinConditionCard extends StatelessWidget {
+  final SkinDailyRecord record;
+
+  const _TodaySkinConditionCard({required this.record});
+
+  @override
+  Widget build(BuildContext context) {
+    final letter = record.conditionGrade;
+    final title = skinConditionGradeTitleJa(letter);
+    Color accent;
+    switch (letter) {
+      case 'S':
+        accent = const Color(0xFF7C3AED);
+        break;
+      case 'A':
+        accent = const Color(0xFF4E6CF0);
+        break;
+      case 'B':
+        accent = const Color(0xFFF59E0B);
+        break;
+      default:
+        accent = const Color(0xFF94A3B8);
+    }
+    final sub = Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.black54);
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: accent.withValues(alpha: 0.35), width: 1.5),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '今日の肌の調子',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  letter,
+                  style: TextStyle(
+                    fontSize: 52,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                    color: accent,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black87,
+                            ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text('艶・潤い・血色のバランスから算出', style: sub),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _metricChip('艶', record.glossPct, const Color(0xFF4E6CF0)),
+                _metricChip('潤い', record.moisturePct, const Color(0xFF06B6D4)),
+                _metricChip('血色', record.bloodPct, const Color(0xFFF472B6)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _metricChip(String label, int pct, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        '$label ${pct.clamp(0, 100)}%',
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          color: color.withValues(alpha: 1),
+          fontSize: 13,
+        ),
       ),
     );
   }

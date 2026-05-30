@@ -1,5 +1,4 @@
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:kami_face_oracle/services/currency_service.dart';
 
 /// 占い相談の「通常相談券」「優先券」と、至急の1日枠（日本時間の日付で集計・最大5回/日）
 class ConsultationTicketService {
@@ -36,13 +35,9 @@ class ConsultationTicketService {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getBool(_kInit) == true) return;
 
-    final wallet = await CurrencyService.load();
-    var normal = (wallet['coins']! ~/ 20).clamp(0, 999);
-    var priority = (wallet['gems']! ~/ 5).clamp(0, 999);
-    if (normal == 0 && priority == 0) {
-      normal = 3;
-      priority = 2;
-    }
+    // 初回のみ体験用（以降はストアで相談券を購入）
+    const normal = 0;
+    const priority = 0;
     await prefs.setInt(_kNormal, normal);
     await prefs.setInt(_kPriority, priority);
     await prefs.setBool(_kInit, true);

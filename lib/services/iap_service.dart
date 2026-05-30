@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:in_app_purchase/in_app_purchase.dart';
-import 'package:in_app_purchase_android/in_app_purchase_android.dart';
-import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
-import 'package:kami_face_oracle/services/currency_service.dart';
 
-/// IAP (In-App Purchase) サービス
-/// Google Play Billing / Apple App Store IAP統合
+import 'package:flutter/foundation.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
+import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart';
+import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
+import 'package:kami_face_oracle/services/iap_purchase_ack_store.dart';
+
+/// IAP (In-App Purchase) — Google Play / App Store の相談券パック購入。
 class IAPService {
   static final IAPService _instance = IAPService._internal();
   factory IAPService() => _instance;
@@ -18,142 +20,150 @@ class IAPService {
   StreamSubscription<List<PurchaseDetails>>? _subscription;
   bool _isAvailable = false;
   List<ProductDetails> _products = [];
+  String? _lastLoadError;
 
-  /// IAPサービスの初期化
+  /// 購入成功で相談券を付与したとき（UI 更新用）。
+  void Function(int ticketsGranted, String productId)? onTicketsGranted;
+
+  bool get isAvailable => _isAvailable;
+  String? get lastLoadError => _lastLoadError;
+
+  static List<String> get productIds =>
+      ConsultationTicketPacksService.packs.map((p) => p.id).toList();
+
+  /// IAP 初期化（アプリ起動時に1回）。
   Future<void> init() async {
-    _isAvailable = await _iap.isAvailable();
-    if (!_isAvailable) return;
+    try {
+      _isAvailable = await _iap.isAvailable();
+      if (!_isAvailable) {
+        debugPrint('[IAPService] billing not available on this device');
+        return;
+      }
 
-    // 購入ストリームの監視
-    _subscription = _iap.purchaseStream.listen(
-      _onPurchaseUpdate,
-      onDone: () => _subscription?.cancel(),
-      onError: (error) => _handleError(error),
-    );
+      _subscription = _iap.purchaseStream.listen(
+        _onPurchaseUpdate,
+        onDone: () => _subscription?.cancel(),
+        onError: _handleError,
+      );
 
-    // 未処理の購入を復元
-    await _restorePurchases();
+      await loadProducts();
+    } catch (e, st) {
+      _isAvailable = false;
+      debugPrint('[IAPService] init failed: $e\n$st');
+    }
   }
 
-  /// 利用可能な商品IDのリスト（gem_packsから取得）
-  static const List<String> _productIds = [
-    'gem_pack_small', // 10ジェム (100円相当)
-    'gem_pack_medium', // 50ジェム (450円相当)
-    'gem_pack_large', // 100ジェム (800円相当)
-    'gem_pack_xlarge', // 200ジェム (1500円相当)
-  ];
-
-  /// 商品詳細を取得
+  /// Play / App Store から商品情報を取得。
   Future<void> loadProducts() async {
+    _lastLoadError = null;
     if (!_isAvailable) return;
 
-    final Set<String> productIds = _productIds.toSet();
-    final ProductDetailsResponse response = await _iap.queryProductDetails(productIds);
+    final productIds = IAPService.productIds.toSet();
+    final response = await _iap.queryProductDetails(productIds);
 
+    if (response.error != null) {
+      _lastLoadError = response.error!.message;
+      debugPrint('[IAPService] queryProductDetails error: ${response.error}');
+    }
     if (response.notFoundIDs.isNotEmpty) {
-      // 一部の商品が見つからない場合でも続行
+      debugPrint('[IAPService] not found on store: ${response.notFoundIDs}');
     }
 
-    _products = response.productDetails;
+    _products = response.productDetails
+      ..sort((a, b) {
+        final ta = ConsultationTicketPacksService.getPackById(a.id)?.tickets ?? 0;
+        final tb = ConsultationTicketPacksService.getPackById(b.id)?.tickets ?? 0;
+        return ta.compareTo(tb);
+      });
   }
 
-  /// 商品一覧を取得
-  List<ProductDetails> get products => _products;
+  ProductDetails? productById(String id) {
+    for (final p in _products) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
 
-  /// 商品を購入
+  List<ProductDetails> get products => List.unmodifiable(_products);
+
+  /// 相談券パックを購入（消耗型）。
   Future<bool> buyProduct(ProductDetails product) async {
     if (!_isAvailable) return false;
 
-    final PurchaseParam purchaseParam = PurchaseParam(productDetails: product);
+    final purchaseParam = PurchaseParam(productDetails: product);
 
     if (Platform.isIOS) {
-      final InAppPurchaseStoreKitPlatformAddition iosPlatformAddition =
-          _iap.getPlatformAddition<InAppPurchaseStoreKitPlatformAddition>();
-      await iosPlatformAddition.showPriceConsentIfNeeded();
+      final ios = _iap.getPlatformAddition<InAppPurchaseStoreKitPlatformAddition>();
+      await ios.showPriceConsentIfNeeded();
     }
 
-    return await _iap.buyNonConsumable(purchaseParam: purchaseParam);
+    return _iap.buyConsumable(purchaseParam: purchaseParam, autoConsume: true);
   }
 
-  /// 購入履歴を復元
   Future<void> restorePurchases() async {
-    await _restorePurchases();
-  }
-
-  /// 購入更新のハンドラー
-  void _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
-    for (final purchase in purchases) {
-      if (purchase.status == PurchaseStatus.pending) {
-        // 購入保留中（承認待ちなど）
-        continue;
-      }
-
-      if (purchase.status == PurchaseStatus.error) {
-        // エラー処理
-        _handlePurchaseError(purchase);
-        await _iap.completePurchase(purchase);
-        continue;
-      }
-
-      if (purchase.status == PurchaseStatus.purchased || purchase.status == PurchaseStatus.restored) {
-        // 購入成功：ジェムを付与
-        await _grantGems(purchase);
-        await _iap.completePurchase(purchase);
-      }
-
-      if (purchase.status == PurchaseStatus.canceled) {
-        // キャンセル
-        await _iap.completePurchase(purchase);
-      }
-    }
-  }
-
-  /// ジェム付与ロジック
-  Future<void> _grantGems(PurchaseDetails purchase) async {
-    final productId = purchase.productID;
-    int gems = 0;
-
-    // 商品IDに応じてジェム数を決定
-    switch (productId) {
-      case 'gem_pack_small':
-        gems = 10;
-        break;
-      case 'gem_pack_medium':
-        gems = 50;
-        break;
-      case 'gem_pack_large':
-        gems = 100;
-        break;
-      case 'gem_pack_xlarge':
-        gems = 200;
-        break;
-      default:
-        // 未知の商品ID
-        return;
-    }
-
-    // ジェムを付与
-    await CurrencyService.addGems(gems);
-  }
-
-  /// 購入の復元
-  Future<void> _restorePurchases() async {
     if (!_isAvailable) return;
-
     await _iap.restorePurchases();
   }
 
-  /// エラーハンドリング
-  void _handleError(dynamic error) {
-    // エラーログ（実際のアプリではFirebase Crashlyticsなどに送信）
+  Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
+    for (final purchase in purchases) {
+      if (purchase.status == PurchaseStatus.pending) continue;
+
+      if (purchase.status == PurchaseStatus.error) {
+        _handlePurchaseError(purchase);
+        if (purchase.pendingCompletePurchase) {
+          await _iap.completePurchase(purchase);
+        }
+        continue;
+      }
+
+      if (purchase.status == PurchaseStatus.purchased ||
+          purchase.status == PurchaseStatus.restored) {
+        final granted = await _grantConsultationTicketsIfNew(purchase);
+        if (purchase.pendingCompletePurchase) {
+          await _iap.completePurchase(purchase);
+        }
+        if (granted != null && granted > 0) {
+          onTicketsGranted?.call(granted, purchase.productID);
+        }
+        continue;
+      }
+
+      if (purchase.status == PurchaseStatus.canceled) {
+        if (purchase.pendingCompletePurchase) {
+          await _iap.completePurchase(purchase);
+        }
+      }
+    }
+  }
+
+  /// 購入1件につき1回だけ相談券を付与。戻り値は付与枚数（スキップ時は null）。
+  Future<int?> _grantConsultationTicketsIfNew(PurchaseDetails purchase) async {
+    final purchaseId = purchase.purchaseID ?? '${purchase.productID}_${purchase.transactionDate}';
+    final isNew = await IapPurchaseAckStore.markProcessedIfNew(purchaseId);
+    if (!isNew) {
+      debugPrint('[IAPService] skip duplicate purchase $purchaseId');
+      return null;
+    }
+
+    final pack = ConsultationTicketPacksService.getPackById(purchase.productID);
+    if (pack == null || pack.tickets <= 0) return null;
+
+    await ConsultationTicketService.addNormalTickets(pack.tickets);
+    debugPrint('[IAPService] granted ${pack.tickets} ticket(s) for ${purchase.productID}');
+    return pack.tickets;
+  }
+
+  void _handleError(Object error) {
+    debugPrint('[IAPService] purchase stream error: $error');
   }
 
   void _handlePurchaseError(PurchaseDetails purchase) {
-    // 購入エラーの処理（実際のアプリではユーザーに通知）
+    debugPrint('[IAPService] purchase error: ${purchase.error}');
   }
 
-  /// リソースのクリーンアップ
   void dispose() {
     _subscription?.cancel();
+    onTicketsGranted = null;
   }
 }

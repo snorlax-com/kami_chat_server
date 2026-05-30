@@ -1,10 +1,17 @@
-import 'dart:io';
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:kami_face_oracle/core/portrait_lock.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:kami_face_oracle/app_widgets.dart';
+import 'package:kami_face_oracle/bootstrap/deferred_startup.dart';
+import 'package:kami_face_oracle/bootstrap/opening_video_preload.dart';
+import 'package:kami_face_oracle/core/e2e.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
+import 'package:kami_face_oracle/app_navigation.dart';
+import 'package:kami_face_oracle/services/notification_launch_router.dart';
+import 'package:kami_face_oracle/services/push_notification_service.dart';
 import 'package:kami_face_oracle/services/guest_session_service.dart';
 import 'package:kami_face_oracle/services/remote_config_service.dart';
 import 'package:kami_face_oracle/services/iap_service.dart';
@@ -12,60 +19,62 @@ import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/core/personality_mapping_table.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-const _intentChannel = MethodChannel('com.auraface.kami_face_oracle/intent');
+bool get _integrationTestConsultation =>
+    bool.fromEnvironment('INTEGRATION_TEST_CONSULTATION', defaultValue: false);
 
-Future<String?> _resolveAutoInputPathForAutoMode() async {
+/// スプラッシュ動画を出さない E2E 経路では、従来どおり初期化完了まで待ってから [runApp] する。
+bool _skipOpeningSplashAwaitDeferredFirst() {
+  if (!E2E.isEnabled) return false;
+  if (_integrationTestConsultation) return true;
   try {
-    final externalCacheDirs = await getExternalCacheDirectories();
-    if (externalCacheDirs != null && externalCacheDirs.isNotEmpty) {
-      for (final dir in externalCacheDirs) {
-        final f = File('${dir.path}/auto_input.png');
-        if (await f.exists()) return f.path;
-      }
-    }
-  } catch (_) {}
-  const candidates = [
-    '/storage/emulated/0/Android/data/com.auraface.kami_face_oracle/cache/auto_input.png',
-    '/sdcard/Android/data/com.auraface.kami_face_oracle/cache/auto_input.png',
-  ];
-  for (final p in candidates) {
-    final f = File(p);
-    if (await f.exists()) return f.path;
+    final qp = Uri.base.queryParameters;
+    return qp['route'] == 'camera' || qp['camera'] == '1';
+  } catch (_) {
+    return false;
   }
-  try {
-    final extra = await _intentChannel.invokeMethod<Map<dynamic, dynamic>>('getIntentExtra');
-    final path = extra?['image_path'] as String?;
-    if (path != null && path.isNotEmpty) {
-      final f = File(path);
-      if (await f.exists()) return f.path;
-    }
-  } catch (_) {}
-  return null;
 }
 
-Future<void> runAppAsync() async {
-  WidgetsFlutterBinding.ensureInitialized();
+Future<void> _runDeferredInitIo() async {
+  await PushNotificationService.instance.ensureLocalReady();
   await CloudService.init();
+  await PushNotificationService.instance.init();
   await GuestSessionService.ensureGuestSessionId();
   await RemoteConfigService.instance.init();
   await IAPService.instance.init();
   await BackgroundMusicService().initialize();
   await PersonalityMappingTable.initialize();
-  await Hive.initFlutter();
   await Hive.openBox<Map>('skin_daily_records');
+}
 
-  bool intentAutoMode = false;
+Future<void> runAppAsync() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await lockPortraitOrientation();
+
   try {
-    final extra = await _intentChannel.invokeMethod<Map<dynamic, dynamic>>('getIntentExtra');
-    intentAutoMode = (extra?['auto_mode'] as bool?) ?? false;
-  } catch (_) {}
-
-  if (intentAutoMode) {
-    final resolvedPath = await _resolveAutoInputPathForAutoMode();
-    if (resolvedPath != null) {
-      runApp(ProviderScope(child: AuraFaceAutoApp(initialImagePath: resolvedPath)));
-      return;
-    }
+    await Hive.initFlutter();
+  } catch (e, st) {
+    debugPrint('[Hive] initFlutter failed: $e\n$st');
   }
+
+  // 通知タップ起動: ローカル／FCM を runApp 前に検知してスプラッシュを省略
+  await PushNotificationService.instance.ensureLocalReady();
+  await PushNotificationService.instance.consumeColdStartNotificationTap();
+  await CloudService.init();
+  await PushNotificationService.instance.consumeFcmInitialMessageIfAny();
+
+  // 動画デコードと各種 init を runApp より前に待たず並列化し、黒い待ち時間を短くする。
+  OpeningVideoPreload.start();
+  DeferredStartup.begin(_runDeferredInitIo);
+
+  if (_skipOpeningSplashAwaitDeferredFirst()) {
+    await DeferredStartup.awaitReady();
+  }
+
   runApp(const ProviderScope(child: AuraFaceApp()));
+
+  if (NotificationLaunchRouter.skipOpeningSplash) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(AppNavigation.openConsultationChat());
+    });
+  }
 }

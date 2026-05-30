@@ -203,6 +203,8 @@ class AuraFaceChatMailService {
     required bool urgent,
     String? userEmail,
     String? userName,
+    String? fcmToken,
+    String? fcmPlatform,
   }) {
     final ct = urgent ? ConsultationMailType.priorityGuidance : ConsultationMailType.normal;
     final urgentVal = urgent;
@@ -230,6 +232,8 @@ class AuraFaceChatMailService {
       consultationPriority: priorityVal,
       userEmail: userEmail,
       userName: userName,
+      fcmToken: fcmToken,
+      fcmPlatform: fcmPlatform,
     );
   }
 
@@ -271,6 +275,8 @@ class AuraFaceChatMailService {
     required int consultationPriority,
     String? userEmail,
     String? userName,
+    String? fcmToken,
+    String? fcmPlatform,
   }) async {
     _warnUrlMismatchIfRelease(baseUrl);
     final uri = Uri.parse('$baseUrl/api/chat/send');
@@ -303,6 +309,8 @@ class AuraFaceChatMailService {
       'aurafaceSendTier': ct,
       'urgent': urgent,
       'consultationPriority': consultationPriority,
+      if (fcmToken != null && fcmToken.trim().isNotEmpty) 'fcmToken': fcmToken.trim(),
+      if (fcmPlatform != null && fcmPlatform.trim().isNotEmpty) 'fcmPlatform': fcmPlatform.trim(),
     };
     final bodyStr = jsonEncode(bodyMap);
     final headerMap = <String, String>{

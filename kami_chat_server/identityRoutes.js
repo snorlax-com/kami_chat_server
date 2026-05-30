@@ -5,6 +5,7 @@ const { randomUUID } = require("crypto");
 const { createGuestSessionId } = require("./idUtils");
 const idb = require("./identityDb");
 const { resolveUserFromRequest, isFirebaseConfigured } = require("./firebaseVerify");
+const fcmTokens = require("./push/fcmTokens");
 
 const router = express.Router();
 
@@ -175,6 +176,50 @@ router.get("/diagnosis/me", async (req, res) => {
     });
   } catch (e) {
     console.error("[identity] diagnosis/me", e);
+    return res.status(500).json({ status: "error", message: String(e.message || e) });
+  }
+});
+
+/** POST /api/fcm/register-token — FCM トークンを Firestore に保存（Admin SDK） */
+router.post("/fcm/register-token", async (req, res) => {
+  try {
+    const identity = await resolveUserFromRequest(req);
+    if (!identity) {
+      if (!isFirebaseConfigured() && process.env.NODE_ENV === "production") {
+        return res.status(503).json({
+          status: "error",
+          message: "Firebase admin not configured",
+        });
+      }
+      return res.status(401).json({ status: "error", message: "unauthorized" });
+    }
+    const body = req.body || {};
+    const token = String(body.token || "").trim();
+    const platform = String(body.platform || "unknown").trim().slice(0, 16);
+    if (!token) {
+      return res.status(400).json({ status: "error", message: "token required" });
+    }
+    const savedUids = new Set();
+    const okMain = await fcmTokens.saveTokenForUser(identity.uid, token, platform);
+    savedUids.add(identity.uid);
+    if (!okMain) {
+      return res.status(503).json({ status: "error", message: "failed to save token" });
+    }
+
+    const bridgeUserId = String(body.bridgeUserId || body.userId || "").trim();
+    if (bridgeUserId && bridgeUserId !== identity.uid) {
+      await fcmTokens.saveTokenForUser(bridgeUserId, token, platform);
+      savedUids.add(bridgeUserId);
+    }
+
+    return res.json({
+      status: "ok",
+      saved: true,
+      docId: fcmTokens.tokenDocId(token),
+      userIds: [...savedUids],
+    });
+  } catch (e) {
+    console.error("[identity] fcm/register-token", e);
     return res.status(500).json({ status: "error", message: String(e.message || e) });
   }
 });

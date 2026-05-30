@@ -10,6 +10,9 @@ class File {
   Future<int> length() => throw UnsupportedError('dart:io File is not available on web');
   Future<File> copy(String newPath) => throw UnsupportedError('dart:io File is not available on web');
   Future<void> delete() => throw UnsupportedError('dart:io File is not available on web');
+  Future<String> readAsString() => throw UnsupportedError('dart:io File is not available on web');
+  Future<File> writeAsString(String contents) => throw UnsupportedError('dart:io File is not available on web');
+  Future<File> rename(String newPath) => throw UnsupportedError('dart:io File is not available on web');
 }
 
 class Directory {
@@ -18,4 +21,6 @@ class Directory {
   String get parent => throw UnsupportedError('dart:io Directory is not available on web');
   Future<bool> exists() => throw UnsupportedError('dart:io Directory is not available on web');
   Stream<dynamic> list() => throw UnsupportedError('dart:io Directory is not available on web');
+  Future<Directory> create({bool recursive = false}) =>
+      throw UnsupportedError('dart:io Directory is not available on web');
 }

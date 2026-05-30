@@ -1,0 +1,15 @@
+{
+  "name": "auraface",
+  "private": true,
+  "scripts": {
+    "android:test": "bash scripts/android-test.sh 8080",
+    "android:test:release": "bash scripts/android-test-release.sh 8080",
+    "web:serve": "python3 -m http.server 4173 --directory build/web",
+    "web:serve:device": "node scripts/serve-web-for-device.js",
+    "web:serve:device:build": "node scripts/serve-web-for-device.js --build",
+    "web:serve:device:https": "node scripts/serve-web-for-device.js --https",
+    "web:serve:device:https:build": "node scripts/serve-web-for-device.js --https --build",
+    "e2e:personality": "cd e2e && npx playwright test specs/personality-flow.spec.js",
+    "render:deploy": "bash scripts/trigger-render-deploy.sh"
+  }
+}
