@@ -98,9 +98,25 @@ class ConsultationTicketService {
   static Future<String?> validateNormalSend() async {
     final n = await normalTickets();
     if (n < normalCostPerSend) {
-      return '通常相談券が不足しています。';
+      return '通常質問券が不足しています。';
     }
     return null;
+  }
+
+  /// 至急券（優先券）のみを検証（IAP 至急券用。1日枠は別途）。
+  static Future<String?> validateUrgentTicketSend() async {
+    final p = await priorityTickets();
+    if (p < priorityCostPerSend) {
+      return '至急券が不足しています。';
+    }
+    return null;
+  }
+
+  static Future<void> consumeUrgentTicket() async {
+    await _ensureInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    final v = ((prefs.getInt(_kPriority) ?? 0) - priorityCostPerSend).clamp(0, 1 << 20);
+    await prefs.setInt(_kPriority, v);
   }
 
   static Future<void> consumeNormalTicket() async {

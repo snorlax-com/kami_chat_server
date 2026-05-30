@@ -13,14 +13,20 @@ class DeferredStartup {
     _future ??= () async {
       try {
         await work();
+        debugPrint('[DeferredStartup] init complete');
       } catch (e, st) {
         debugPrint('[DeferredStartup] init failed: $e\n$st');
       }
     }();
   }
 
-  /// スプラッシュ終了時など、初期化完了を待つ。
-  static Future<void> awaitReady() async {
-    await (_future ?? Future<void>.value());
+  /// スプラッシュ終了時など、初期化完了を待つ（タイムアウト付き）。
+  static Future<void> awaitReady({Duration timeout = const Duration(seconds: 10)}) async {
+    final f = _future ?? Future<void>.value();
+    try {
+      await f.timeout(timeout);
+    } on TimeoutException {
+      debugPrint('[DeferredStartup] awaitReady timeout after ${timeout.inSeconds}s — continuing');
+    }
   }
 }

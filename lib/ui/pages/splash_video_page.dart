@@ -136,8 +136,8 @@ class _SplashVideoPageState extends State<SplashVideoPage> {
     if (!mounted || _navigated) return;
     _navigated = true;
     _controller?.removeListener(_maybeComplete);
-    await DeferredStartup.awaitReady();
-    // 次画面へ
+    await DeferredStartup.awaitReady(timeout: const Duration(seconds: 8));
+    if (!mounted) return;
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(builder: (_) => widget.next),
     );

@@ -16,6 +16,8 @@ import 'package:kami_face_oracle/services/developer_reply_notification_watchdog.
 import 'package:kami_face_oracle/services/developer_reply_notify_service.dart';
 import 'package:kami_face_oracle/services/consultation_tab_visibility.dart';
 import 'package:kami_face_oracle/services/notification_permission_prompt.dart';
+import 'package:kami_face_oracle/services/store_access_service.dart';
+import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/bootstrap/deferred_startup.dart';
 
 const Color _kNavSelected = Color(0xFF8B5CF6);
@@ -68,12 +70,19 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       });
     }
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await DeferredStartup.awaitReady();
+      await DeferredStartup.awaitReady(timeout: const Duration(seconds: 10));
       if (!mounted) return;
       await NotificationPermissionPrompt.maybeShow(context);
     });
     if (_index == 3) {
       unawaited(_playMeditationForTab());
+    }
+    if (_index == AppNavigation.tabStore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!await StoreAccessService.canOpenStore() && mounted) {
+          setState(() => _index = 0);
+        }
+      });
     }
   }
 
@@ -116,7 +125,16 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
   }
 
   /// 瞑想トラックは下部ナビの「瞑想」アイコンのみで再生（他タブで通常BGMに戻す）
-  void _onBarTap(int i) {
+  Future<void> _onBarTap(int i) async {
+    if (i == AppNavigation.tabStore) {
+      final allowed = await StoreAccessService.canOpenStore();
+      if (!allowed) {
+        if (!mounted) return;
+        await _promptSubscribeBeforeStore();
+        return;
+      }
+    }
+
     final wasMeditation = _index == 3;
     if (_index == 1 && i != 1) {
       AppNavigation.saveConsultationDraftNow();
@@ -128,10 +146,40 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       AppNavigation.scrollConsultationToLatest.value++;
       unawaited(_refreshConsultationUnread());
     }
+    if (i == AppNavigation.tabStore) {
+      AppNavigation.refreshStoreTab.value++;
+    }
     if (i == 3) {
       unawaited(_playMeditationForTab());
     } else if (wasMeditation) {
       unawaited(BackgroundMusicService().stopMeditationMusic());
+    }
+  }
+
+  Future<void> _promptSubscribeBeforeStore() async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('サブスク加入が必要です'),
+        content: const Text(
+          'ストアはサブスク加入後にご利用いただけます。\n'
+          '質問券の購入は、占い相談でサブスクに加入してから行ってください。',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('閉じる')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('サブスクに加入'),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    await StoreSubscriptionFlow.purchase(context);
+    if (!mounted) return;
+    if (await StoreAccessService.canOpenStore()) {
+      setState(() => _index = AppNavigation.tabStore);
+      AppNavigation.refreshStoreTab.value++;
     }
   }
 

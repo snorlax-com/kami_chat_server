@@ -7,6 +7,8 @@ import 'package:kami_face_oracle/core/deities.dart';
 import 'package:kami_face_oracle/core/deity.dart';
 import 'package:kami_face_oracle/ui/pages/meditation_page.dart';
 import 'package:kami_face_oracle/ui/pages/store_page.dart';
+import 'package:kami_face_oracle/services/store_access_service.dart';
+import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/services/currency_service.dart';
 import 'package:kami_face_oracle/ui/pages/legal_document_page.dart';
 import 'package:kami_face_oracle/ui/pages/privacy_settings_page.dart';
@@ -191,6 +193,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _gems = w['gems']!;
       _fragments = w['fragments']!;
     });
+  }
+
+  Future<void> _openStore() async {
+    if (!await StoreAccessService.canOpenStore()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ストアはサブスク加入後にご利用いただけます。占い相談から加入してください。')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const StorePage()));
   }
 
   Future<void> _loadTutorialDeity() async {
@@ -429,8 +443,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           title: 'ストア',
                           subtitle: 'アイテム',
                           color: const Color(0xFFFFB84D),
-                          onPressed: () =>
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const StorePage())),
+                          onPressed: () => unawaited(_openStore()),
                         ),
                       ),
                     ],

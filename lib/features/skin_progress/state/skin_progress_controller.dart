@@ -1,14 +1,12 @@
 import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive/hive.dart';
 import '../../../skin_analysis.dart';
 import '../data/skin_record_repository.dart';
 import '../data/skin_record_repository_hive.dart';
 import '../model/skin_daily_record.dart';
 
 final skinRecordRepositoryProvider = Provider<SkinRecordRepository>((ref) {
-  final box = Hive.box<Map>('skin_daily_records');
-  return SkinRecordRepositoryHive(box);
+  return SkinRecordRepositoryHive();
 });
 
 final skinProgressProvider = FutureProvider<List<SkinDailyRecord>>((ref) async {

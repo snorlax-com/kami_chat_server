@@ -18,6 +18,7 @@ import java.io.InputStream
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.auraface.kami_face_oracle/file_access"
     private val INTENT_CHANNEL = "com.auraface.kami_face_oracle/intent"
+    private val BILLING_CHANNEL = "com.auraface.kami_face_oracle/billing"
     private var latestIntent: Intent? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,7 +35,6 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         
-        // Intentで受け取った画像パスとauto_modeをFlutterに渡す
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INTENT_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getIntentImagePath" -> {
@@ -48,6 +48,15 @@ class MainActivity : FlutterActivity() {
                 else -> {
                     result.notImplemented()
                 }
+            }
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BILLING_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getInstallerPackageName" -> {
+                    result.success(resolveInstallerPackageName())
+                }
+                else -> result.notImplemented()
             }
         }
         
@@ -100,6 +109,20 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
+        }
+    }
+
+    private fun resolveInstallerPackageName(): String? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                packageManager.getInstallSourceInfo(packageName).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getInstallerPackageName(packageName)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "getInstallerPackageName failed", e)
+            null
         }
     }
 

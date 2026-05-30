@@ -28,6 +28,9 @@ class AppNavigation {
   /// 占い相談タブ表示時にチャットを最新へスクロールする。
   static final ValueNotifier<int> scrollConsultationToLatest = ValueNotifier(0);
 
+  /// ストアタブ表示時に残高・商品を再読み込みする。
+  static final ValueNotifier<int> refreshStoreTab = ValueNotifier(0);
+
   static void stagePendingConsultationChat(String? chatId) {
     if (chatId == null || chatId.trim().isEmpty) return;
     _pendingChatId = chatId.trim();

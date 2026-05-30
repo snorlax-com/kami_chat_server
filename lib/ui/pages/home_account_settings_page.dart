@@ -7,6 +7,8 @@ import 'package:kami_face_oracle/services/cloud_service.dart';
 import 'package:kami_face_oracle/services/developer_reply_test_service.dart';
 import 'package:kami_face_oracle/services/notification_permission_prompt.dart';
 import 'package:kami_face_oracle/services/push_notification_service.dart';
+import 'package:kami_face_oracle/services/subscription_management_service.dart';
+import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/ui/widgets/auraface_auth_sheet.dart';
 
 /// ホームから開くアカウント設定（ログイン / ログアウト / 通知）
@@ -22,12 +24,16 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
   NotificationPermissionStatus? _notifyStatus;
   bool _notifyLoading = true;
   bool _notifyTestBusy = false;
+  SubscriptionSettingsInfo? _subscriptionInfo;
+  bool _subscriptionLoading = true;
+  bool _subscriptionBusy = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadNotificationStatus();
+    _loadSubscriptionInfo();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await PushNotificationService.instance.ensureLocalReady();
       if (!mounted) return;
@@ -46,7 +52,98 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _loadNotificationStatus();
+      _loadSubscriptionInfo();
     }
+  }
+
+  Future<void> _loadSubscriptionInfo() async {
+    setState(() => _subscriptionLoading = true);
+    final info = await SubscriptionManagementService.loadInfo();
+    if (mounted) {
+      setState(() {
+        _subscriptionInfo = info;
+        _subscriptionLoading = false;
+      });
+    }
+  }
+
+  Future<void> _openStoreSubscriptionManagement() async {
+    setState(() => _subscriptionBusy = true);
+    try {
+      final ok = await SubscriptionManagementService.openStoreSubscriptionManagement();
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ストアのサブスク管理画面を開けませんでした')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('ストアでサブスクの解除・変更ができます。戻ったら「状態を再確認」を押してください。'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _subscriptionBusy = false);
+    }
+  }
+
+  Future<void> _confirmCancelLocalSubscription({
+    required String title,
+    required String body,
+    required Future<void> Function() onConfirm,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('解除する'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _subscriptionBusy = true);
+    try {
+      await onConfirm();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('サブスクを解除しました')),
+      );
+      await _loadSubscriptionInfo();
+    } finally {
+      if (mounted) setState(() => _subscriptionBusy = false);
+    }
+  }
+
+  Future<void> _cancelSideloadTestSubscription() async {
+    await _confirmCancelLocalSubscription(
+      title: 'テストサブスクを解除',
+      body: 'ADB 直インストール用のテスト加入を解除します。占い相談の送信には再度サブスク加入が必要です。',
+      onConfirm: SubscriptionManagementService.cancelSideloadTestSubscription,
+    );
+  }
+
+  Future<void> _cancelLocalDebugSubscription() async {
+    await _confirmCancelLocalSubscription(
+      title: 'サブスクを解除',
+      body: 'ローカルのサブスク状態を解除します。',
+      onConfirm: SubscriptionManagementService.cancelLocalDebugSubscription,
+    );
+  }
+
+  Future<void> _startSubscriptionPurchase() async {
+    await StoreSubscriptionFlow.purchase(context);
+    await _loadSubscriptionInfo();
   }
 
   Future<void> _loadNotificationStatus() async {
@@ -146,6 +243,114 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('ログアウトしました')),
+    );
+  }
+
+  Widget _subscriptionSection(BuildContext context) {
+    final info = _subscriptionInfo;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  info?.isSubscribed == true ? Icons.verified : Icons.card_membership_outlined,
+                  color: info?.isSubscribed == true ? const Color(0xFF8B5CF6) : Colors.white54,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '占い相談サブスク',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '占い相談の送信には月額サブスクへの加入が必要です。',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70),
+            ),
+            const SizedBox(height: 12),
+            if (_subscriptionLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(8),
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else if (info != null) ...[
+              Text(
+                info.isSubscribed ? '状態: 加入中' : '状態: 未加入',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: info.isSubscribed ? Colors.lightGreenAccent : Colors.orange.shade200,
+                    ),
+              ),
+              if (info.isSubscribed) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '${info.planName}（${info.priceLabel}）',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+              const SizedBox(height: 12),
+              if (_subscriptionBusy)
+                const Center(child: CircularProgressIndicator(strokeWidth: 2))
+              else if (info.isSubscribed) ...[
+                if (info.managementKind == SubscriptionManagementKind.googlePlay ||
+                    info.managementKind == SubscriptionManagementKind.appStore) ...[
+                  Text(
+                    info.managementKind == SubscriptionManagementKind.googlePlay
+                        ? 'サブスクの解除・変更は Google Play の定期購入管理から行います。'
+                        : 'サブスクの解除・変更は App Store のサブスクリプション管理から行います。',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    onPressed: _openStoreSubscriptionManagement,
+                    icon: const Icon(Icons.open_in_new),
+                    label: Text(
+                      info.managementKind == SubscriptionManagementKind.googlePlay
+                          ? 'Google Play でサブスクを解除'
+                          : 'App Store でサブスクを管理',
+                    ),
+                  ),
+                ] else if (info.managementKind == SubscriptionManagementKind.sideloadTest) ...[
+                  Text(
+                    'ADB 直インストール用のテスト加入中です。本番の Play 課金とは別の状態です。',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _cancelSideloadTestSubscription,
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: const Text('テストサブスクを解除'),
+                  ),
+                ] else if (info.managementKind == SubscriptionManagementKind.localDebug) ...[
+                  OutlinedButton.icon(
+                    onPressed: _cancelLocalDebugSubscription,
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: const Text('サブスクを解除'),
+                  ),
+                ],
+              ] else ...[
+                OutlinedButton.icon(
+                  onPressed: () => unawaited(_startSubscriptionPurchase()),
+                  icon: const Icon(Icons.card_membership),
+                  label: const Text('サブスクに加入'),
+                ),
+              ],
+              TextButton(
+                onPressed: _loadSubscriptionInfo,
+                child: const Text('状態を再確認'),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -328,6 +533,8 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
+              _subscriptionSection(context),
+              const SizedBox(height: 20),
               _notificationSection(context),
               const SizedBox(height: 20),
               Card(
