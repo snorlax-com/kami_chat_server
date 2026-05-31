@@ -9,6 +9,7 @@ import 'package:kami_face_oracle/services/cloud_service.dart';
 import 'package:kami_face_oracle/services/developer_reply_test_service.dart';
 import 'package:kami_face_oracle/services/notification_permission_prompt.dart';
 import 'package:kami_face_oracle/services/push_notification_service.dart';
+import 'package:kami_face_oracle/services/play_store_launcher.dart';
 import 'package:kami_face_oracle/services/subscription_management_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/ui/widgets/auraface_auth_sheet.dart';
@@ -66,6 +67,21 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
         _subscriptionInfo = info;
         _subscriptionLoading = false;
       });
+    }
+  }
+
+  Future<void> _openPlayStoreListing() async {
+    setState(() => _subscriptionBusy = true);
+    try {
+      final ok = await PlayStoreLauncher.openAppListing();
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Google Play ストアを開けませんでした')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _subscriptionBusy = false);
     }
   }
 
@@ -331,6 +347,12 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
                     icon: const Icon(Icons.cancel_outlined),
                     label: const Text('テストサブスクを解除'),
                   ),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: _subscriptionBusy ? null : _openPlayStoreListing,
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Play ストアを開く'),
+                  ),
                 ] else if (info.managementKind == SubscriptionManagementKind.localDebug) ...[
                   OutlinedButton.icon(
                     onPressed: _cancelLocalDebugSubscription,
@@ -343,6 +365,12 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
                   onPressed: () => unawaited(_startSubscriptionPurchase()),
                   icon: const Icon(Icons.card_membership),
                   label: const Text('サブスクに加入'),
+                ),
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: _subscriptionBusy ? null : _openPlayStoreListing,
+                  icon: const Icon(Icons.open_in_new),
+                  label: const Text('Play ストアを開く'),
                 ),
               ],
               TextButton(
