@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
 import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
 import 'package:kami_face_oracle/services/iap_service.dart';
@@ -134,6 +135,7 @@ class StoreSubscriptionFlow {
     onPurchasingChanged?.call(plan.productId);
     try {
       final bonus = await LocalTicketStoreService.purchaseSubscription(sideloadTest: true);
+      AppNavigation.notifyStoreAccessChanged();
       StoreUiHelper.showSnack('テスト加入（初回特典 +$bonus 通常券）', backgroundColor: Colors.green);
     } finally {
       onPurchasingChanged?.call(null);
@@ -158,6 +160,7 @@ class StoreSubscriptionFlow {
     onPurchasingChanged?.call(plan.productId);
     try {
       final bonus = await LocalTicketStoreService.purchaseSubscription();
+      AppNavigation.notifyStoreAccessChanged();
       StoreUiHelper.showSnack('サブスク加入（初回特典 +$bonus 通常券）', backgroundColor: Colors.green);
     } finally {
       onPurchasingChanged?.call(null);

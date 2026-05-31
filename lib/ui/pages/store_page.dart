@@ -231,6 +231,12 @@ class _StorePageState extends State<StorePage> {
   Future<void> _purchasePack(ConsultationTicketPack pack) async {
     if (!await StoreAccessService.guardTicketPurchase(context)) return;
     if (!mounted) return;
+
+    if (_canUseSideloadTest) {
+      await _purchasePackSideloadTest(pack);
+      return;
+    }
+
     if (_iap.canPurchaseViaPlay(pack)) {
       final product = _iap.productById(pack.id)!;
       final ok = await StoreUiHelper.confirm(
@@ -270,10 +276,6 @@ class _StorePageState extends State<StorePage> {
 
     if (StoreBillingConfig.allowAppStoreWhenPlayMissing) {
       await _purchasePackAppStore(pack);
-      return;
-    }
-    if (_canUseSideloadTest) {
-      await _purchasePackSideloadTest(pack);
       return;
     }
     _showPlayUnavailableMessage();

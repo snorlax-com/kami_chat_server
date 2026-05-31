@@ -31,6 +31,14 @@ class AppNavigation {
   /// ストアタブ表示時に残高・商品を再読み込みする。
   static final ValueNotifier<int> refreshStoreTab = ValueNotifier(0);
 
+  /// サブスク加入・解除後に [MainTabShell] のストアアクセス状態を更新する。
+  static final ValueNotifier<int> refreshStoreAccess = ValueNotifier(0);
+
+  static void notifyStoreAccessChanged() {
+    refreshStoreAccess.value++;
+    refreshStoreTab.value++;
+  }
+
   static void stagePendingConsultationChat(String? chatId) {
     if (chatId == null || chatId.trim().isEmpty) return;
     _pendingChatId = chatId.trim();

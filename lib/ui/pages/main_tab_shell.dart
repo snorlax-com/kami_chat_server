@@ -41,6 +41,7 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
   bool _storeAccessAllowed = false;
   Timer? _unreadPollTimer;
   Timer? _devReplyNotifyTimer;
+  VoidCallback? _storeAccessListener;
 
   static const _titles = [
     'ホーム',
@@ -61,6 +62,8 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     ConsultationTabVisibility.appResumed = true;
     _refreshConsultationUnread();
     unawaited(_refreshStoreAccess());
+    _storeAccessListener = () => unawaited(_refreshStoreAccess());
+    AppNavigation.refreshStoreAccess.addListener(_storeAccessListener!);
     _unreadPollTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshConsultationUnread());
     _devReplyNotifyTimer = Timer.periodic(
       const Duration(seconds: 15),
@@ -89,6 +92,9 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
   void dispose() {
     AppNavigation.unregisterShellOpener();
     AppNavigation.unregisterMainTabSwitcher();
+    if (_storeAccessListener != null) {
+      AppNavigation.refreshStoreAccess.removeListener(_storeAccessListener!);
+    }
     WidgetsBinding.instance.removeObserver(this);
     _unreadPollTimer?.cancel();
     _devReplyNotifyTimer?.cancel();
