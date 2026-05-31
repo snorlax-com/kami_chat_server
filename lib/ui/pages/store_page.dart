@@ -13,8 +13,10 @@ import 'package:kami_face_oracle/services/store_catalog_service.dart';
 import 'package:kami_face_oracle/services/play_install_service.dart';
 import 'package:kami_face_oracle/services/sideload_billing_service.dart';
 import 'package:kami_face_oracle/services/store_ui_helper.dart';
+import 'package:kami_face_oracle/services/store_access_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/services/subscription_management_service.dart';
+import 'package:kami_face_oracle/ui/pages/store_locked_page.dart';
 
 class StorePage extends StatefulWidget {
   const StorePage({super.key, this.embedInShell = false});
@@ -31,6 +33,8 @@ class _StorePageState extends State<StorePage> {
   int _normalTickets = 0;
   int _urgentTickets = 0;
   bool _isSubscribed = false;
+  bool _storeAccessAllowed = false;
+  bool _canPurchaseTickets = false;
   bool _isSideloadInstall = false;
   String? _purchasingId;
   VoidCallback? _refreshListener;
@@ -111,7 +115,7 @@ class _StorePageState extends State<StorePage> {
   }
 
   bool get _canUseSideloadTest =>
-      StoreBillingConfig.allowSideloadTestPurchases && _isSideloadInstall && !_iap.hasPlayCatalog;
+      StoreBillingConfig.allowSideloadTestPurchases && _isSideloadInstall;
 
   Future<void> _load({bool refreshBalanceOnly = false}) async {
     if (!refreshBalanceOnly) {
@@ -123,16 +127,25 @@ class _StorePageState extends State<StorePage> {
     }
     final normal = await ConsultationTicketService.normalTickets();
     final urgent = await ConsultationTicketService.priorityTickets();
-    var sub = await ConsultationSubscriptionService.isActive();
-    if (StoreBillingConfig.requirePlayVerifiedAccess) {
-      final sideloadOk = await SideloadBillingService.isSideloadTestSubscriptionValid();
-      sub = sub && (_iap.hasVerifiedPlaySubscription || sideloadOk);
+    final allowed = await StoreAccessService.canOpenStore();
+    final canBuyTickets = await StoreAccessService.canPurchaseConsultationTickets();
+    var sub = allowed;
+    if (!allowed) {
+      sub = false;
+    } else {
+      sub = await ConsultationSubscriptionService.isActive();
+      if (StoreBillingConfig.requirePlayVerifiedAccess) {
+        final sideloadOk = await SideloadBillingService.isSideloadTestSubscriptionValid();
+        sub = sub && (_iap.hasVerifiedPlaySubscription || sideloadOk);
+      }
     }
     if (!mounted) return;
     setState(() {
       _normalTickets = normal;
       _urgentTickets = urgent;
       _isSubscribed = sub;
+      _storeAccessAllowed = allowed;
+      _canPurchaseTickets = canBuyTickets;
       _isLoading = false;
     });
   }
@@ -216,6 +229,8 @@ class _StorePageState extends State<StorePage> {
   }
 
   Future<void> _purchasePack(ConsultationTicketPack pack) async {
+    if (!await StoreAccessService.guardTicketPurchase(context)) return;
+    if (!mounted) return;
     if (_iap.canPurchaseViaPlay(pack)) {
       final product = _iap.productById(pack.id)!;
       final ok = await StoreUiHelper.confirm(
@@ -355,18 +370,20 @@ class _StorePageState extends State<StorePage> {
               width: double.infinity,
               child: isBuying
                   ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                  : FilledButton(
-                      onPressed: () => unawaited(
-                        _isSubscribed && _iap.canSubscribeViaPlay
-                            ? _openPlaySubscriptionManagement()
-                            : _purchaseSubscription(),
-                      ),
-                      child: Text(
-                        _isSubscribed && _iap.canSubscribeViaPlay
-                            ? 'Google Play で管理'
-                            : (_canUseSideloadTest ? 'テスト加入' : 'サブスクに加入'),
-                      ),
-                    ),
+                  : _isSubscribed
+                      ? (_iap.canSubscribeViaPlay
+                          ? FilledButton(
+                              onPressed: () => unawaited(_openPlaySubscriptionManagement()),
+                              child: const Text('Google Play で管理'),
+                            )
+                          : OutlinedButton(
+                              onPressed: null,
+                              child: Text(_canUseSideloadTest ? 'テスト加入済み' : '加入済み'),
+                            ))
+                      : FilledButton(
+                          onPressed: () => unawaited(_purchaseSubscription()),
+                          child: Text(_canUseSideloadTest ? 'テスト加入' : 'サブスクに加入'),
+                        ),
             ),
           ],
         ),
@@ -378,6 +395,7 @@ class _StorePageState extends State<StorePage> {
     final isBuying = _purchasingId == pack.id;
     final product = _iap.productById(pack.id);
     final price = product?.price ?? (pack.referencePriceYen != null ? '¥${pack.referencePriceYen}' : '');
+    final purchaseEnabled = _canPurchaseTickets;
 
     return Card(
       color: const Color(0xFF141A2E),
@@ -405,7 +423,7 @@ class _StorePageState extends State<StorePage> {
             isBuying
                 ? const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2))
                 : FilledButton(
-                    onPressed: () => unawaited(_purchasePack(pack)),
+                    onPressed: purchaseEnabled ? () => unawaited(_purchasePack(pack)) : null,
                     child: Text(_canUseSideloadTest ? 'テスト購入' : '購入'),
                   ),
           ],
@@ -416,8 +434,8 @@ class _StorePageState extends State<StorePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_isLoading && !_isSubscribed) {
-      return _buildStoreLockedBody();
+    if (!_isLoading && !_storeAccessAllowed) {
+      return StoreLockedPage(embedInShell: widget.embedInShell);
     }
 
     final packs = StoreCatalogService.consumables;
@@ -450,6 +468,20 @@ class _StorePageState extends State<StorePage> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
                       _buildSubscriptionCard(),
+                      if (!_canPurchaseTickets) ...[
+                        const SizedBox(height: 8),
+                        Card(
+                          color: const Color(0xFF2A2030),
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Text(
+                              '初回相談はサブスク特典の通常券をご利用ください。\n'
+                              '2回目以降、ここで通常券・至急券を購入できます。',
+                              style: TextStyle(color: Colors.amber.shade100, fontSize: 13, height: 1.35),
+                            ),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 8),
                       ...packs.map(_buildPackCard),
                       if (kDebugMode && _iap.lastLoadError != null)
@@ -469,33 +501,5 @@ class _StorePageState extends State<StorePage> {
 
     if (widget.embedInShell) return body;
     return Scaffold(appBar: AppBar(title: const Text('ストア')), body: body);
-  }
-
-  Widget _buildStoreLockedBody() {
-    const locked = Center(
-      child: Padding(
-        padding: EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.lock_outline, size: 48, color: Colors.white54),
-            SizedBox(height: 16),
-            Text(
-              'ストアはサブスク加入後にご利用いただけます',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 16),
-            ),
-            SizedBox(height: 8),
-            Text(
-              '占い相談タブからサブスクに加入してください。',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white54, fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (widget.embedInShell) return locked;
-    return Scaffold(appBar: AppBar(title: const Text('ストア')), body: locked);
   }
 }

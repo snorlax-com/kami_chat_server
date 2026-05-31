@@ -6,6 +6,7 @@ import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/ui/pages/home_page.dart';
 import 'package:kami_face_oracle/ui/pages/kami_chat_page.dart';
 import 'package:kami_face_oracle/ui/pages/store_page.dart';
+import 'package:kami_face_oracle/ui/pages/store_locked_page.dart';
 import 'package:kami_face_oracle/ui/pages/meditation_page.dart';
 import 'package:kami_face_oracle/ui/pages/public_consultations_page.dart';
 import 'package:kami_face_oracle/ui/pages/home_account_settings_page.dart';
@@ -37,6 +38,7 @@ class MainTabShell extends StatefulWidget {
 class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver {
   late int _index;
   bool _consultationUnread = false;
+  bool _storeAccessAllowed = false;
   Timer? _unreadPollTimer;
   Timer? _devReplyNotifyTimer;
 
@@ -58,6 +60,7 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     AppNavigation.registerMainTabSwitcher(_onBarTap);
     ConsultationTabVisibility.appResumed = true;
     _refreshConsultationUnread();
+    unawaited(_refreshStoreAccess());
     _unreadPollTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshConsultationUnread());
     _devReplyNotifyTimer = Timer.periodic(
       const Duration(seconds: 15),
@@ -78,11 +81,7 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       unawaited(_playMeditationForTab());
     }
     if (_index == AppNavigation.tabStore) {
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (!await StoreAccessService.canOpenStore() && mounted) {
-          setState(() => _index = 0);
-        }
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_refreshStoreAccess()));
     }
   }
 
@@ -109,7 +108,19 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     DeveloperReplyNotificationWatchdog.instance.onLifecycleChange(state);
     if (state == AppLifecycleState.resumed) {
       _refreshConsultationUnread();
+      unawaited(_refreshStoreAccess());
       unawaited(DeveloperReplyNotifyService.pollAndNotify());
+    }
+  }
+
+  Future<void> _refreshStoreAccess() async {
+    final allowed = await StoreAccessService.canOpenStore();
+    if (!mounted) return;
+    if (!allowed && _index == AppNavigation.tabStore) {
+      setState(() => _index = 0);
+    }
+    if (_storeAccessAllowed != allowed) {
+      setState(() => _storeAccessAllowed = allowed);
     }
   }
 
@@ -127,8 +138,8 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
   /// 瞑想トラックは下部ナビの「瞑想」アイコンのみで再生（他タブで通常BGMに戻す）
   Future<void> _onBarTap(int i) async {
     if (i == AppNavigation.tabStore) {
-      final allowed = await StoreAccessService.canOpenStore();
-      if (!allowed) {
+      await _refreshStoreAccess();
+      if (!_storeAccessAllowed) {
         if (!mounted) return;
         await _promptSubscribeBeforeStore();
         return;
@@ -162,8 +173,8 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       builder: (ctx) => AlertDialog(
         title: const Text('サブスク加入が必要です'),
         content: const Text(
-          'ストアはサブスク加入後にご利用いただけます。\n'
-          '質問券の購入は、占い相談でサブスクに加入してから行ってください。',
+          'ストアは定期購入サブスク加入後にご利用いただけます。\n'
+          '占い相談タブから月額サブスクに加入してください。',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('閉じる')),
@@ -178,6 +189,8 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     await StoreSubscriptionFlow.purchase(context);
     if (!mounted) return;
     if (await StoreAccessService.canOpenStore()) {
+      await _refreshStoreAccess();
+      if (!mounted) return;
       setState(() => _index = AppNavigation.tabStore);
       AppNavigation.refreshStoreTab.value++;
     }
@@ -223,13 +236,14 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
                   child: IconButton(
                     icon: const Icon(Icons.settings_outlined),
                     tooltip: '設定',
-                    onPressed: () {
-                      Navigator.push(
+                    onPressed: () async {
+                      await Navigator.push(
                         context,
                         MaterialPageRoute<void>(
                           builder: (_) => const HomeAccountSettingsPage(),
                         ),
                       );
+                      if (mounted) await _refreshStoreAccess();
                     },
                   ),
                 ),
@@ -238,12 +252,14 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       ),
       body: IndexedStack(
         index: _index,
-        children: const [
-          HomePage(embedInShell: true),
-          KamiChatPage(),
-          StorePage(embedInShell: true),
-          MeditationPage(embedInShell: true),
-          PublicConsultationsPage(),
+        children: [
+          const HomePage(embedInShell: true),
+          const KamiChatPage(),
+          _storeAccessAllowed
+              ? const StorePage(embedInShell: true)
+              : const StoreLockedPage(embedInShell: true),
+          const MeditationPage(embedInShell: true),
+          const PublicConsultationsPage(),
         ],
       ),
       bottomNavigationBar: SafeArea(
@@ -289,7 +305,11 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
   }
 
   Widget _navIcon(int i, bool selected) {
-    final icon = Icon(_iconFor(i, selected));
+    final lockedStore = i == AppNavigation.tabStore && !_storeAccessAllowed;
+    final icon = Icon(
+      lockedStore ? Icons.lock_outline : _iconFor(i, selected),
+      color: lockedStore ? _kNavUnselected.withValues(alpha: 0.5) : null,
+    );
     if (i != 1 || !_consultationUnread) return icon;
     return Stack(
       clipBehavior: Clip.none,

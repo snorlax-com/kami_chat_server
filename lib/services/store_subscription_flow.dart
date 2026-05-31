@@ -4,6 +4,7 @@ import 'package:kami_face_oracle/services/consultation_subscription_service.dart
 import 'package:kami_face_oracle/services/iap_service.dart';
 import 'package:kami_face_oracle/services/local_ticket_store_service.dart';
 import 'package:kami_face_oracle/services/play_install_service.dart';
+import 'package:kami_face_oracle/services/play_store_launcher.dart';
 import 'package:kami_face_oracle/services/sideload_billing_service.dart';
 import 'package:kami_face_oracle/services/store_catalog_service.dart';
 import 'package:kami_face_oracle/services/store_ui_helper.dart';
@@ -19,12 +20,17 @@ class StoreSubscriptionFlow {
     await StoreCatalogService.ensureLoaded();
     await PlayInstallService.ensureLoaded();
     final iap = IAPService.instance;
-    await iap.ensureReady();
+    await iap.refreshCatalog();
 
     final isSideload = PlayInstallService.isSideloadInstall;
     final canUseSideloadTest =
-        StoreBillingConfig.allowSideloadTestPurchases && isSideload && !iap.hasPlayCatalog;
+        StoreBillingConfig.allowSideloadTestPurchases && isSideload;
     final plan = StoreCatalogService.subscription;
+
+    if (canUseSideloadTest) {
+      await _purchaseSideloadTest(context, onPurchasingChanged: onPurchasingChanged);
+      return;
+    }
 
     if (iap.canSubscribeViaPlay) {
       final product = iap.subscriptionProduct!;
@@ -43,10 +49,15 @@ class StoreSubscriptionFlow {
         case StorePurchasePlayLaunchFailed():
         case StorePurchaseUnavailable():
           onPurchasingChanged?.call(null);
-          if (StoreBillingConfig.allowAppStoreWhenPlayMissing) {
-            await _purchaseAppStore(context, onPurchasingChanged: onPurchasingChanged);
-          } else if (canUseSideloadTest) {
+          StoreUiHelper.showSnack(
+            'Google Play の購入画面を開けませんでした。Play ストア版をインストールしているか確認してください。',
+            backgroundColor: Colors.orange.shade800,
+          );
+          if (await _offerOpenPlayStore(context)) return;
+          if (canUseSideloadTest) {
             await _purchaseSideloadTest(context, onPurchasingChanged: onPurchasingChanged);
+          } else if (StoreBillingConfig.allowAppStoreWhenPlayMissing) {
+            await _purchaseAppStore(context, onPurchasingChanged: onPurchasingChanged);
           } else {
             _showPlayUnavailable(context, isSideload, iap);
           }
@@ -58,27 +69,50 @@ class StoreSubscriptionFlow {
       await _purchaseAppStore(context, onPurchasingChanged: onPurchasingChanged);
       return;
     }
-    if (canUseSideloadTest) {
-      await _purchaseSideloadTest(context, onPurchasingChanged: onPurchasingChanged);
-      return;
-    }
-    _showPlayUnavailable(context, isSideload, iap);
+    await _showPlayUnavailable(context, isSideload, iap);
   }
 
-  static void _showPlayUnavailable(BuildContext context, bool isSideload, IAPService iap) {
+  static Future<bool> _offerOpenPlayStore(BuildContext context) async {
+    final ok = await StoreUiHelper.confirm(
+      title: 'Play ストアを開く',
+      body:
+          'Google Play からアプリをインストールすると、定期購入の課金画面が利用できます。\n'
+          '（内部テストに参加している Google アカウントでログインしてください）',
+      confirmLabel: 'Play ストアを開く',
+      cancelLabel: 'キャンセル',
+      fallbackContext: context,
+    );
+    if (!ok) return false;
+    return PlayStoreLauncher.openAppListing();
+  }
+
+  static Future<void> _showPlayUnavailable(
+    BuildContext context,
+    bool isSideload,
+    IAPService iap,
+  ) async {
     final parts = <String>[
       'Google Play 課金を開始できません。',
       if (isSideload)
         '現在 ADB 直インストールです。Play Console の内部テスト経由でインストールすると本番課金が使えます。',
       if (!iap.isAvailable) '端末の Play ストア / 課金サービスを確認してください。',
-      if (iap.isAvailable && !iap.hasPlayCatalog)
-        'Play Console に商品が未登録、または反映待ちの可能性があります。',
+      if (iap.isAvailable && !iap.hasSubscriptionInCatalog)
+        'Play Console の定期購入「${StoreCatalogService.subscription.productId}」が未取得です。反映まで最大数時間かかることがあります。',
       if (StoreBillingConfig.allowSideloadTestPurchases &&
           isSideload &&
-          !iap.hasPlayCatalog)
+          !iap.hasSubscriptionInCatalog)
         '占い相談画面からテスト加入できます（実課金なし）。',
     ];
-    StoreUiHelper.showSnack(parts.join('\n'), backgroundColor: Colors.orange.shade800);
+    final open = await StoreUiHelper.confirm(
+      title: 'Google Play 課金を利用できません',
+      body: parts.join('\n'),
+      confirmLabel: 'Play ストアを開く',
+      cancelLabel: '閉じる',
+      fallbackContext: context,
+    );
+    if (open) {
+      await PlayStoreLauncher.openAppListing();
+    }
   }
 
   static Future<void> _purchaseSideloadTest(

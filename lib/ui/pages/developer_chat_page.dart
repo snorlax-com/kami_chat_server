@@ -22,6 +22,7 @@ import 'package:kami_face_oracle/services/developer_reply_notify_service.dart';
 import 'package:kami_face_oracle/services/consultation_active_thread_resolver.dart';
 import 'package:kami_face_oracle/services/store_access_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
+import 'package:kami_face_oracle/services/consultation_send_history_service.dart';
 import 'package:kami_face_oracle/services/store_ui_helper.dart';
 
 String? _resolvedTierFromBridge(SendChatResponse? bridge) {
@@ -747,6 +748,8 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     await Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(builder: (_) => const StorePage()),
     );
+    await _restoreConsultationDraft();
+    await _loadAccessState();
   }
 
   Future<void> _startSubscriptionPurchase() async {
@@ -826,6 +829,10 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
   Future<void> _promptPurchaseTicketChoice() async {
     if (!mounted) return;
+    if (!await StoreAccessService.canPurchaseConsultationTickets()) {
+      await StoreAccessService.guardTicketPurchase(context);
+      return;
+    }
     await ConsultationTicketPacksService.ensureLoaded();
     final normal = ConsultationTicketPacksService.normalTicketProduct;
     final urgent = ConsultationTicketPacksService.urgentTicketProduct;
@@ -883,13 +890,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
         false;
     if (!go || !mounted) return;
     await _persistConsultationDraft();
-    if (widget.embedInShell) {
-      _navigateToStoreTab();
-    } else {
-      await Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => const StorePage()));
-      await _restoreConsultationDraft();
-      await _loadAccessState();
-    }
+    await _openStoreIfSubscribed();
   }
 
   Future<void> _sendFirstConsultation({
@@ -1019,6 +1020,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
     _input.clear();
     if (mailSuccess) {
+      await ConsultationSendHistoryService.markFirstConsultationCompleted();
       if (ticketKind == ConsultationSendTicketKind.urgent) {
         await ConsultationTicketService.consumeUrgentTicket();
       } else {
@@ -1109,6 +1111,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       } else {
         await ConsultationTicketService.consumeNormalTicket();
       }
+      await ConsultationSendHistoryService.markFirstConsultationCompleted();
       await _loadAccessState();
       await BridgeThreadLocalStore.appendUserMessage(
         chatId: _chatId!,

@@ -35,14 +35,10 @@ class PlayInstallService {
 
   static bool get isInstalledFromPlayStore => _installedFromPlayStore ?? false;
 
-  /// ADB / PC ツール等による sideload。
+  /// ADB / PC ツール等による sideload（Play ストア経由でないインストール）。
   static bool get isSideloadInstall {
     if (!Platform.isAndroid) return false;
-    if (_installedFromPlayStore == true) return false;
-    final p = _installerPackage;
-    if (p == null || p.isEmpty) return true;
-    const sideload = {'pc', 'adb', 'com.android.shell', 'unknown'};
-    return sideload.contains(p);
+    return !isInstalledFromPlayStore;
   }
 
   static void debugReset() {

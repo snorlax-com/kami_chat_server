@@ -76,5 +76,9 @@
         <package android:name="com.chrome.dev" />
         <!-- Google Play 課金（Android 11+ パッケージ可視性） -->
         <package android:name="com.android.vending" />
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="market"/>
+        </intent>
     </queries>
 </manifest>

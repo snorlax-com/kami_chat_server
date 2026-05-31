@@ -56,6 +56,11 @@ class MainActivity : FlutterActivity() {
                 "getInstallerPackageName" -> {
                     result.success(resolveInstallerPackageName())
                 }
+                "openPlayStoreUrl" -> {
+                    val url = call.argument<String>("url")
+                    val marketUrl = call.argument<String>("marketUrl")
+                    result.success(openPlayStoreUrl(url, marketUrl))
+                }
                 else -> result.notImplemented()
             }
         }
@@ -124,6 +129,35 @@ class MainActivity : FlutterActivity() {
             android.util.Log.w("MainActivity", "getInstallerPackageName failed", e)
             null
         }
+    }
+
+    private fun openPlayStoreUrl(httpsUrl: String?, marketUrl: String?): Boolean {
+        val candidates = listOfNotNull(marketUrl, httpsUrl).filter { it.isNotBlank() }
+        if (candidates.isEmpty()) return false
+
+        for (url in candidates) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    if (url.startsWith("https://play.google.com") || url.startsWith("market://")) {
+                        setPackage("com.android.vending")
+                    }
+                }
+                startActivity(intent)
+                android.util.Log.i("MainActivity", "openPlayStoreUrl ok: $url")
+                return true
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "openPlayStoreUrl failed (Play app): $url", e)
+            }
+
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                android.util.Log.i("MainActivity", "openPlayStoreUrl ok (fallback): $url")
+                return true
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "openPlayStoreUrl failed (fallback): $url", e)
+            }
+        }
+        return false
     }
 
     private fun copyFileToInternalStorage(externalPath: String): String? {

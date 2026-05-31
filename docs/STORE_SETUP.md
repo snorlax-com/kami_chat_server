@@ -65,9 +65,21 @@ AuraFace のストアは **月額サブスク** と **消耗型相談券** を G
 
 ### 3. テスト
 
-1. 内部テストトラックに AAB をアップロード
+1. 内部テストトラックに **AAB** をアップロード（`flutter build appbundle --release`）
 2. **ライセンステスト** にテスト用 Google アカウントを追加
-3. Play 経由でインストール（ADB 直インストールのみだと商品クエリが空になることがある）
+3. **Play ストアの内部テストリンク** からインストール（ADB 直インストールでは商品が取得できません）
+4. 占い相談 → **サブスクに加入** → Google Play 課金画面が開くことを確認
+
+### Play Console 設定チェック（定期購入）
+
+| 項目 | 値 |
+|------|-----|
+| 商品 ID | `monthly_subscription_500` |
+| 基本プラン | ¥500 / 1か月 |
+| 状態 | **有効** |
+| アプリ | `com.auraface.kami_face_oracle` に紐付け |
+
+反映まで **数時間** かかることがあります。logcat の `[AuraFaceBilling] subscription ready` で取得確認できます。
 
 ---
 
@@ -104,10 +116,10 @@ Android 版を優先実装。iOS 側は `defaultTargetPlatform` で分岐し、
 
 ## チェックリスト
 
-- [ ] Play Console に定期購入 `monthly_subscription_500`
+- [x] Play Console に定期購入 `monthly_subscription_500`（設定済み）
 - [ ] Play Console に消耗型 2商品（ID 一致）
 - [ ] 内部テストトラックに AAB アップロード
-- [ ] ライセンステスター追加
+- [ ] Play ストア経由でインストール
 - [ ] サブスク加入 → 初回通常券1枚
 - [ ] 通常券/至急券購入 → 残数増加
 - [ ] 占い相談送信 → 券1枚減少

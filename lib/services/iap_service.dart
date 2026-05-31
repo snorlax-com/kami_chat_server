@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
@@ -12,7 +11,6 @@ import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart
 import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/services/iap_purchase_ack_store.dart';
-import 'package:kami_face_oracle/services/play_install_service.dart';
 import 'package:kami_face_oracle/services/sideload_billing_service.dart';
 import 'package:kami_face_oracle/services/subscription_bonus_service.dart';
 
@@ -114,14 +112,20 @@ class IAPService {
     }
 
     _products = response.productDetails;
+    final sub = subscriptionProduct;
     BillingLog.info(
       'catalog loaded: ${_products.length} products [${_products.map((p) => p.id).join(", ")}]',
     );
+    if (sub != null) {
+      BillingLog.info('subscription ready id=${sub.id} price=${sub.price}');
+    } else {
+      BillingLog.info('subscription NOT in catalog (id=${ConsultationSubscriptionConfig.productId})');
+    }
   }
 
   Future<void> _invalidateUnverifiedSubscriptionIfNeeded() async {
     if (!StoreBillingConfig.requirePlayVerifiedAccess) return;
-    if (!_isAvailable || !hasPlayCatalog) {
+    if (!_isAvailable || !hasSubscriptionInCatalog) {
       _playSubscriptionVerified = false;
       if (await SideloadBillingService.isSideloadTestSubscriptionValid()) {
         BillingLog.info('keeping sideload test subscription');
@@ -140,6 +144,9 @@ class IAPService {
   }
 
   ProductDetails? get subscriptionProduct => productById(ConsultationSubscriptionConfig.productId);
+
+  /// Play からサブスク商品が取得できている。
+  bool get hasSubscriptionInCatalog => subscriptionProduct != null;
 
   bool get hasPlayCatalog => _products.isNotEmpty;
 
@@ -187,10 +194,28 @@ class IAPService {
     if (!_isAvailable) return false;
     await _preparePlatformPurchase();
     if (Platform.isAndroid && product is GooglePlayProductDetails) {
+      final token = product.offerToken;
+      if (token == null || token.isEmpty) {
+        BillingLog.error('buySubscription missing offerToken id=${product.id} — retry catalog');
+        await loadProducts();
+        final refreshed = subscriptionProduct;
+        if (refreshed is GooglePlayProductDetails &&
+            refreshed.offerToken != null &&
+            refreshed.offerToken!.isNotEmpty) {
+          return _iap.buyNonConsumable(
+            purchaseParam: GooglePlayPurchaseParam(
+              productDetails: refreshed,
+              offerToken: refreshed.offerToken,
+            ),
+          );
+        }
+        BillingLog.error('buySubscription still missing offerToken', product.id);
+        return false;
+      }
       return _iap.buyNonConsumable(
         purchaseParam: GooglePlayPurchaseParam(
           productDetails: product,
-          offerToken: product.offerToken,
+          offerToken: token,
         ),
       );
     }
