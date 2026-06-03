@@ -14,7 +14,7 @@ class ConsultationIdentity {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              '相談を送るには、まず性格診断結果の画面で Google・Apple・メールのいずれかでログインしてください。',
+              '相談を送るには、まず性格診断結果の画面で Google でログインしてください。',
             ),
             duration: Duration(seconds: 8),
           ),

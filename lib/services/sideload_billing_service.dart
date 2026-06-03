@@ -20,10 +20,15 @@ class SideloadBillingService {
 
   /// sideload テスト購入のサブスクをアクセス判定に使えるか。
   static Future<bool> isSideloadTestSubscriptionValid() async {
-    await PlayInstallService.ensureLoaded();
-    if (!PlayInstallService.isSideloadInstall) return false;
     if (!await hasSideloadTestPurchase()) return false;
-    return ConsultationSubscriptionService.isActive();
+    await PlayInstallService.ensureLoaded();
+    if (!PlayInstallService.isSideloadInstall) {
+      return ConsultationSubscriptionService.isActive();
+    }
+    if (!await ConsultationSubscriptionService.isActive()) {
+      await ConsultationSubscriptionService.setActive(true);
+    }
+    return true;
   }
 
   static Future<void> clearSideloadTestPurchase() async {

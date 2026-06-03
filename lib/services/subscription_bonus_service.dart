@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kami_face_oracle/config/consultation_subscription_config.dart';
+import 'package:kami_face_oracle/config/play_billing_products.dart';
+import 'package:kami_face_oracle/services/billing_server_sync_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 
 /// サブスク初回特典（通常質問券1枚）の1回限り付与。
@@ -24,6 +26,12 @@ class SubscriptionBonusService {
 
     await ConsultationTicketService.addNormalTickets(tickets);
     await prefs.setBool(_kBonusGranted, true);
+    await BillingServerSyncService.syncPurchase(
+      productId: PlayBillingProducts.subscriptionMonthly500,
+      purchaseId: 'first_bonus_${DateTime.now().millisecondsSinceEpoch}',
+      isSubscription: true,
+      isRestore: false,
+    );
     return tickets;
   }
 }

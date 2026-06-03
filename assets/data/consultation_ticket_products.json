@@ -1,7 +1,7 @@
 {
   "products": [
     {
-      "id": "normal_ticket_600",
+      "id": "ticket_normal_600",
       "name": "通常質問券 1枚",
       "tickets": 1,
       "ticketType": "normal",
@@ -9,7 +9,7 @@
       "priceYen": 600
     },
     {
-      "id": "urgent_ticket_10000",
+      "id": "ticket_urgent_10000",
       "name": "至急質問券 1枚",
       "tickets": 1,
       "ticketType": "urgent",

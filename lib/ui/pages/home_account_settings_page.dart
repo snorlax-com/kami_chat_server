@@ -1,17 +1,20 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/services/auraface_auth_service.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
 import 'package:kami_face_oracle/services/developer_reply_test_service.dart';
 import 'package:kami_face_oracle/services/notification_permission_prompt.dart';
 import 'package:kami_face_oracle/services/push_notification_service.dart';
-import 'package:kami_face_oracle/services/play_store_launcher.dart';
 import 'package:kami_face_oracle/services/subscription_management_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
+import 'package:kami_face_oracle/ui/pages/subscription_cancellation_guide_page.dart';
 import 'package:kami_face_oracle/ui/widgets/auraface_auth_sheet.dart';
 
 /// ホームから開くアカウント設定（ログイン / ログアウト / 通知）
@@ -35,6 +38,10 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    debugPrint(
+      '[Settings] HomeAccountSettingsPage init '
+      'android=${!kIsWeb && Platform.isAndroid}',
+    );
     _loadNotificationStatus();
     _loadSubscriptionInfo();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -67,43 +74,38 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
         _subscriptionInfo = info;
         _subscriptionLoading = false;
       });
+      debugPrint(
+        '[Settings] subscription loaded subscribed=${info.isSubscribed} '
+        'kind=${info.managementKind}',
+      );
+      AppNavigation.notifyStoreAccessChanged();
     }
   }
 
-  Future<void> _openPlayStoreListing() async {
-    setState(() => _subscriptionBusy = true);
-    try {
-      final ok = await PlayStoreLauncher.openAppListing();
-      if (!mounted) return;
-      if (!ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Google Play ストアを開けませんでした')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _subscriptionBusy = false);
-    }
+  void _openCancellationGuide() {
+    debugPrint('[Settings] open 解約手順について');
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const SubscriptionCancellationGuidePage(),
+      ),
+    );
   }
 
-  Future<void> _openStoreSubscriptionManagement() async {
-    setState(() => _subscriptionBusy = true);
-    try {
-      final ok = await SubscriptionManagementService.openStoreSubscriptionManagement();
-      if (!mounted) return;
-      if (!ok) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ストアのサブスク管理画面を開けませんでした')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('ストアでサブスクの解除・変更ができます。戻ったら「状態を再確認」を押してください。'),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _subscriptionBusy = false);
-    }
+  /// Google Play 解約手順（Android のみ・サブスク読込状態に依存しない）。
+  Widget _cancellationGuideTile(BuildContext context) {
+    if (kIsWeb || !Platform.isAndroid) return const SizedBox.shrink();
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.help_outline, color: Color(0xFF8B5CF6)),
+        title: const Text('解約手順について'),
+        subtitle: const Text(
+          'Google Play での定期購入の解約方法',
+          style: TextStyle(fontSize: 13),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: _openCancellationGuide,
+      ),
+    );
   }
 
   Future<void> _confirmCancelLocalSubscription({
@@ -214,7 +216,7 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
         padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
         child: AurafaceAuthSheet(
           title: 'ログイン',
-          subtitle: 'Google・Apple・メールのいずれかでサインインすると、診断の保存や相談機能で本人確認に使えます。',
+          subtitle: 'Google でサインインすると、診断の保存や相談機能で本人確認に使えます。',
           onAuthenticated: (user) {
             Navigator.pop(ctx);
             ScaffoldMessenger.of(context).showSnackBar(
@@ -322,19 +324,9 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
                     info.managementKind == SubscriptionManagementKind.appStore) ...[
                   Text(
                     info.managementKind == SubscriptionManagementKind.googlePlay
-                        ? 'サブスクの解除・変更は Google Play の定期購入管理から行います。'
-                        : 'サブスクの解除・変更は App Store のサブスクリプション管理から行います。',
+                        ? 'サブスクの解約・変更は、画面下の「解約手順について」をご確認ください。'
+                        : 'サブスクの解約・変更は、App Store のサブスクリプション管理から行ってください。',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white70),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _openStoreSubscriptionManagement,
-                    icon: const Icon(Icons.open_in_new),
-                    label: Text(
-                      info.managementKind == SubscriptionManagementKind.googlePlay
-                          ? 'Google Play でサブスクを解除'
-                          : 'App Store でサブスクを管理',
-                    ),
                   ),
                 ] else if (info.managementKind == SubscriptionManagementKind.sideloadTest) ...[
                   Text(
@@ -346,12 +338,6 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
                     onPressed: _cancelSideloadTestSubscription,
                     icon: const Icon(Icons.cancel_outlined),
                     label: const Text('テストサブスクを解除'),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton.icon(
-                    onPressed: _subscriptionBusy ? null : _openPlayStoreListing,
-                    icon: const Icon(Icons.open_in_new),
-                    label: const Text('Play ストアを開く'),
                   ),
                 ] else if (info.managementKind == SubscriptionManagementKind.localDebug) ...[
                   OutlinedButton.icon(
@@ -365,12 +351,6 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
                   onPressed: () => unawaited(_startSubscriptionPurchase()),
                   icon: const Icon(Icons.card_membership),
                   label: const Text('サブスクに加入'),
-                ),
-                const SizedBox(height: 8),
-                TextButton.icon(
-                  onPressed: _subscriptionBusy ? null : _openPlayStoreListing,
-                  icon: const Icon(Icons.open_in_new),
-                  label: const Text('Play ストアを開く'),
                 ),
               ],
               TextButton(
@@ -592,6 +572,8 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
                 icon: const Icon(Icons.logout),
                 label: const Text('ログアウト'),
               ),
+              const SizedBox(height: 24),
+              _cancellationGuideTile(context),
               if (!CloudService.isFirebaseAppReady) ...[
                 const SizedBox(height: 24),
                 Text(

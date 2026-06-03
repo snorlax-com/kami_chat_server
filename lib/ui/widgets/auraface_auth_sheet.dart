@@ -100,81 +100,8 @@ class _AurafaceAuthSheetState extends State<AurafaceAuthSheet> {
     });
   }
 
-  Future<void> _apple() async {
-    await _wrap(() async {
-      final c = await AurafaceAuthService.signInWithApple();
-      await _after(c);
-    });
-  }
-
-  Future<void> _showEmailDialog() async {
-    final emailCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
-    final mode = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('メールアドレスで続ける'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: emailCtrl,
-                decoration: const InputDecoration(labelText: 'メールアドレス'),
-                keyboardType: TextInputType.emailAddress,
-                autocorrect: false,
-              ),
-              TextField(
-                controller: passCtrl,
-                decoration: const InputDecoration(labelText: 'パスワード（6文字以上）'),
-                obscureText: true,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('キャンセル'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, 'login'),
-            child: const Text('ログイン'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, 'register'),
-            child: const Text('新規登録'),
-          ),
-        ],
-      ),
-    );
-    if (mode == null || !mounted) {
-      emailCtrl.dispose();
-      passCtrl.dispose();
-      return;
-    }
-    await _wrap(() async {
-      final UserCredential c;
-      if (mode == 'login') {
-        c = await AurafaceAuthService.signInWithEmailPassword(
-          email: emailCtrl.text,
-          password: passCtrl.text,
-        );
-      } else {
-        c = await AurafaceAuthService.registerWithEmailPassword(
-          email: emailCtrl.text,
-          password: passCtrl.text,
-        );
-      }
-      await _after(c);
-    });
-    emailCtrl.dispose();
-    passCtrl.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final appleOk = AurafaceAuthService.appleSignInAvailable;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -205,20 +132,6 @@ class _AurafaceAuthSheetState extends State<AurafaceAuthSheet> {
               onPressed: _busy ? null : _google,
               icon: const Icon(Icons.g_mobiledata, size: 28),
               label: const Text('Googleで続ける'),
-            ),
-            if (appleOk) ...[
-              const SizedBox(height: 10),
-              FilledButton.tonalIcon(
-                onPressed: _busy ? null : _apple,
-                icon: const Icon(Icons.apple),
-                label: const Text('Appleで続ける'),
-              ),
-            ],
-            const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _showEmailDialog,
-              icon: const Icon(Icons.mail_outline),
-              label: const Text('メールアドレスで続ける'),
             ),
             if (_busy) const Padding(
               padding: EdgeInsets.only(top: 16),

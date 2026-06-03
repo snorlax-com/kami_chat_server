@@ -6,7 +6,10 @@ import 'package:kami_face_oracle/services/consultation_send_history_service.dart
 class StoreAccessService {
   StoreAccessService._();
 
-  /// Play / 端末上の定期購入サブスクが有効なときのみ true。
+  /// @deprecated 互換用。[canOpenStore] と同じ（解約後は false）。
+  static Future<bool> canOpenStoreRelaxed() => canOpenStore();
+
+  /// Play 同期後、有効な定期購入サブスクがあるときのみ true（解約済みは false）。
   static Future<bool> canOpenStore() async {
     final state = await ConsultationAccessService.loadState();
     return state.isSubscribed;
@@ -25,7 +28,10 @@ class StoreAccessService {
     if (!context.mounted) return false;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('ストアは定期購入サブスク加入後にご利用いただけます。占い相談から加入してください。'),
+        content: Text(
+          'ストアはサブスクご加入中のみご利用いただけます。'
+          '解約済みの方は、占い相談から再度ご加入ください。',
+        ),
       ),
     );
     return false;

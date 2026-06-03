@@ -1,16 +1,22 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/widgets.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
+import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/config/consultation_subscription_config.dart';
+import 'package:kami_face_oracle/config/play_billing_products.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
+import 'package:kami_face_oracle/services/billing_log.dart';
+import 'package:kami_face_oracle/services/billing_server_sync_service.dart';
 import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
-import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/services/iap_purchase_ack_store.dart';
+import 'package:kami_face_oracle/services/play_billing_error_mapper.dart';
+import 'package:kami_face_oracle/services/play_install_service.dart';
 import 'package:kami_face_oracle/services/sideload_billing_service.dart';
 import 'package:kami_face_oracle/services/subscription_bonus_service.dart';
 
@@ -29,26 +35,29 @@ class IAPService {
   List<ProductDetails> _products = [];
   String? _lastLoadError;
   List<String> _notFoundProductIds = [];
+  final Set<String> _pendingProductIds = {};
   Future<void>? _readyFuture;
 
   void Function(int ticketsGranted, String productId, {bool isUrgent})? onTicketsGranted;
   void Function(String productId)? onPurchaseCanceled;
   void Function(String productId, String? message)? onPurchaseFailed;
+  void Function(String productId)? onPurchasePending;
   void Function(bool isActive, {int bonusTickets})? onSubscriptionUpdated;
 
   bool get isAvailable => _isAvailable;
   String? get lastLoadError => _lastLoadError;
   List<String> get notFoundProductIds => List.unmodifiable(_notFoundProductIds);
+  Set<String> get pendingProductIds => Set.unmodifiable(_pendingProductIds);
 
-  /// Play の queryPastPurchases / 購入完了で確認できたサブスク状態。
+  bool isProductPending(String productId) => _pendingProductIds.contains(productId);
+
   bool get hasVerifiedPlaySubscription => _playSubscriptionVerified;
-
-  /// 課金 UI を起動できる（Billing 利用可 + 商品取得済み）。
   bool get isPlayBillingReady => _isAvailable && hasPlayCatalog;
 
   static Set<String> get allProductIds => {
-        ...ConsultationTicketPacksService.packs.map((p) => p.id),
+        ...PlayBillingProducts.allQueryProductIds,
         ConsultationSubscriptionConfig.productId,
+        ...ConsultationTicketPacksService.packs.map((p) => p.id),
       };
 
   Future<void> init() async => ensureReady();
@@ -58,7 +67,6 @@ class IAPService {
     await _readyFuture;
   }
 
-  /// ストア再読み込み用（初期化済み前提で商品だけ再取得）。
   Future<void> refreshCatalog() async {
     await ensureReady();
     await loadProducts();
@@ -74,7 +82,7 @@ class IAPService {
       _isAvailable = await _iap.isAvailable();
       BillingLog.info('isAvailable=$_isAvailable productIds=$allProductIds');
       if (!_isAvailable) {
-        BillingLog.info('billing not available');
+        BillingLog.warn('billing not available — Play Store ログイン・内部テスト参加を確認');
         return;
       }
 
@@ -101,25 +109,27 @@ class IAPService {
 
     final response = await _iap.queryProductDetails(allProductIds);
     if (response.error != null) {
-      _lastLoadError = response.error!.message;
+      _lastLoadError = PlayBillingErrorMapper.userMessage(response.error);
       BillingLog.error('queryProductDetails', response.error);
     }
     if (response.notFoundIDs.isNotEmpty) {
       _notFoundProductIds = response.notFoundIDs;
-      BillingLog.info('notFoundIDs=${response.notFoundIDs}');
+      BillingLog.warn('notFoundIDs=${response.notFoundIDs} — Play Console ID・反映待ちを確認');
     } else {
       _notFoundProductIds = [];
     }
 
     _products = response.productDetails;
-    final sub = subscriptionProduct;
     BillingLog.info(
-      'catalog loaded: ${_products.length} products [${_products.map((p) => p.id).join(", ")}]',
+      'catalog loaded: ${_products.length} [${_products.map((p) => p.id).join(", ")}]',
     );
+    final sub = subscriptionProduct;
     if (sub != null) {
       BillingLog.info('subscription ready id=${sub.id} price=${sub.price}');
     } else {
-      BillingLog.info('subscription NOT in catalog (id=${ConsultationSubscriptionConfig.productId})');
+      BillingLog.warn(
+        'subscription NOT in catalog (canonical=${ConsultationSubscriptionConfig.productId})',
+      );
     }
   }
 
@@ -127,7 +137,7 @@ class IAPService {
     if (!StoreBillingConfig.requirePlayVerifiedAccess) return;
     if (!_isAvailable || !hasSubscriptionInCatalog) {
       _playSubscriptionVerified = false;
-      if (await SideloadBillingService.isSideloadTestSubscriptionValid()) {
+      if (await _preserveSideloadTestSubscription()) {
         BillingLog.info('keeping sideload test subscription');
         return;
       }
@@ -143,23 +153,34 @@ class IAPService {
     return null;
   }
 
-  ProductDetails? get subscriptionProduct => productById(ConsultationSubscriptionConfig.productId);
+  ProductDetails? productForPack(ConsultationTicketPack pack) {
+    final direct = productById(pack.id);
+    if (direct != null) return direct;
+    final legacy = pack.isUrgent
+        ? PlayBillingProducts.legacyTicketUrgent10000
+        : PlayBillingProducts.legacyTicketNormal600;
+    return productById(legacy);
+  }
 
-  /// Play からサブスク商品が取得できている。
+  ProductDetails? get subscriptionProduct {
+    final canonical = ConsultationSubscriptionConfig.productId;
+    return productById(canonical) ??
+        productById(PlayBillingProducts.legacySubscriptionMonthly500);
+  }
+
   bool get hasSubscriptionInCatalog => subscriptionProduct != null;
-
   bool get hasPlayCatalog => _products.isNotEmpty;
 
   bool canPurchaseViaPlay(ConsultationTicketPack pack) =>
-      _isAvailable && productById(pack.id) != null;
+      _isAvailable && productForPack(pack) != null;
 
   bool get canSubscribeViaPlay => _isAvailable && subscriptionProduct != null;
 
   Future<StorePurchaseOutcome> purchaseConsumable(ConsultationTicketPack pack) async {
-    final product = productById(pack.id);
+    final product = productForPack(pack);
     if (product == null || !_isAvailable) return const StorePurchaseUnavailable();
     final started = await _buyConsumable(product);
-    BillingLog.info('buyConsumable ${pack.id} started=$started');
+    BillingLog.purchase('buyConsumable ${pack.id} started=$started');
     return started
         ? StorePurchasePlayLaunched(pack.id)
         : StorePurchasePlayLaunchFailed(pack.id);
@@ -169,7 +190,9 @@ class IAPService {
     final product = subscriptionProduct;
     if (product == null || !_isAvailable) return const StorePurchaseUnavailable();
     final started = await _buySubscription(product);
-    BillingLog.info('buySubscription ${ConsultationSubscriptionConfig.productId} started=$started offerToken=${product is GooglePlayProductDetails ? product.offerToken : null}');
+    BillingLog.purchase(
+      'buySubscription ${ConsultationSubscriptionConfig.productId} started=$started',
+    );
     return started
         ? StorePurchasePlayLaunched(ConsultationSubscriptionConfig.productId)
         : StorePurchasePlayLaunchFailed(ConsultationSubscriptionConfig.productId);
@@ -194,21 +217,16 @@ class IAPService {
     if (!_isAvailable) return false;
     await _preparePlatformPurchase();
     if (Platform.isAndroid && product is GooglePlayProductDetails) {
-      final token = product.offerToken;
+      var token = product.offerToken;
       if (token == null || token.isEmpty) {
-        BillingLog.error('buySubscription missing offerToken id=${product.id} — retry catalog');
+        BillingLog.warn('buySubscription missing offerToken id=${product.id} — reload catalog');
         await loadProducts();
         final refreshed = subscriptionProduct;
-        if (refreshed is GooglePlayProductDetails &&
-            refreshed.offerToken != null &&
-            refreshed.offerToken!.isNotEmpty) {
-          return _iap.buyNonConsumable(
-            purchaseParam: GooglePlayPurchaseParam(
-              productDetails: refreshed,
-              offerToken: refreshed.offerToken,
-            ),
-          );
+        if (refreshed is GooglePlayProductDetails) {
+          token = refreshed.offerToken;
         }
+      }
+      if (token == null || token.isEmpty) {
         BillingLog.error('buySubscription still missing offerToken', product.id);
         return false;
       }
@@ -230,20 +248,33 @@ class IAPService {
   }
 
   Future<void> restorePurchases() async {
-    if (!_isAvailable) return;
+    if (!_isAvailable) {
+      BillingLog.warn('restorePurchases skipped: billing unavailable');
+      return;
+    }
+    BillingLog.info('restorePurchases start');
     await _iap.restorePurchases();
     await syncSubscriptionStatusFromPlay();
+    BillingLog.info('restorePurchases done');
+  }
+
+  static Future<bool> _preserveSideloadTestSubscription() async {
+    await PlayInstallService.ensureLoaded();
+    if (!PlayInstallService.isSideloadInstall) return false;
+    return SideloadBillingService.hasSideloadTestPurchase();
   }
 
   Future<void> syncSubscriptionStatusFromPlay() async {
     if (!_isAvailable) {
       if (StoreBillingConfig.requirePlayVerifiedAccess) {
         _playSubscriptionVerified = false;
+        if (await _preserveSideloadTestSubscription()) {
+          BillingLog.info('syncSubscription: keep sideload test (billing unavailable)');
+          return;
+        }
         final wasActive = await ConsultationSubscriptionService.isActive();
         await ConsultationSubscriptionService.setActive(false);
-        if (wasActive) {
-          onSubscriptionUpdated?.call(false, bonusTickets: 0);
-        }
+        if (wasActive) onSubscriptionUpdated?.call(false, bonusTickets: 0);
       }
       return;
     }
@@ -252,18 +283,24 @@ class IAPService {
     if (Platform.isAndroid) {
       final android = _iap.getPlatformAddition<InAppPurchaseAndroidPlatformAddition>();
       final response = await android.queryPastPurchases();
-      if (response.error == null) {
+      if (response.error != null) {
+        BillingLog.error('queryPastPurchases', response.error);
+      } else {
         for (final purchase in response.pastPurchases) {
-          if (!ConsultationSubscriptionConfig.isSubscriptionProduct(purchase.productID)) continue;
-          if (purchase.status == PurchaseStatus.purchased ||
-              purchase.status == PurchaseStatus.restored) {
+          if (!PlayBillingProducts.isSubscriptionProduct(purchase.productID)) continue;
+          if (_isActivePurchaseStatus(purchase.status)) {
             active = true;
-            break;
+            await _acknowledgeIfNeeded(purchase, fromRestore: true);
           }
         }
       }
     } else {
       active = await ConsultationSubscriptionService.isActive();
+    }
+
+    if (!active && await _preserveSideloadTestSubscription()) {
+      active = true;
+      BillingLog.info('syncSubscription: sideload test preserved');
     }
 
     _playSubscriptionVerified = active;
@@ -276,34 +313,50 @@ class IAPService {
       onSubscriptionUpdated?.call(true, bonusTickets: bonus);
     } else if (wasActive != active) {
       onSubscriptionUpdated?.call(active, bonusTickets: 0);
+      AppNavigation.notifyStoreAccessChanged();
     }
   }
+
+  static bool _isActivePurchaseStatus(PurchaseStatus status) =>
+      status == PurchaseStatus.purchased || status == PurchaseStatus.restored;
 
   Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
       final productId = purchase.productID;
+      final canonicalId = PlayBillingProducts.resolveCanonicalProductId(productId);
 
-      if (purchase.status == PurchaseStatus.pending) continue;
+      if (purchase.status == PurchaseStatus.pending) {
+        _pendingProductIds.add(canonicalId);
+        BillingLog.purchase('pending product=$productId');
+        onPurchasePending?.call(canonicalId);
+        continue;
+      }
+
+      _pendingProductIds.remove(canonicalId);
 
       if (purchase.status == PurchaseStatus.error) {
+        final msg = PlayBillingErrorMapper.userMessage(purchase.error, productId: productId);
         BillingLog.error('purchase error product=$productId', purchase.error?.message);
-        onPurchaseFailed?.call(productId, purchase.error?.message);
-        if (purchase.pendingCompletePurchase) await _iap.completePurchase(purchase);
+        onPurchaseFailed?.call(canonicalId, msg);
+        await _acknowledgeIfNeeded(purchase);
         continue;
       }
 
       if (purchase.status == PurchaseStatus.canceled) {
-        onPurchaseCanceled?.call(productId);
-        if (purchase.pendingCompletePurchase) await _iap.completePurchase(purchase);
+        BillingLog.purchase('canceled product=$productId');
+        onPurchaseCanceled?.call(canonicalId);
+        await _acknowledgeIfNeeded(purchase);
         continue;
       }
 
-      if (purchase.status == PurchaseStatus.purchased ||
-          purchase.status == PurchaseStatus.restored) {
+      if (_isActivePurchaseStatus(purchase.status)) {
+        BillingLog.purchase(
+          'success product=$productId status=${purchase.status} pendingComplete=${purchase.pendingCompletePurchase}',
+        );
         final result = await _grantBenefitIfNew(purchase);
-        if (purchase.pendingCompletePurchase) await _iap.completePurchase(purchase);
+        await _acknowledgeIfNeeded(purchase);
 
-        if (ConsultationSubscriptionConfig.isSubscriptionProduct(productId)) {
+        if (PlayBillingProducts.isSubscriptionProduct(productId)) {
           await ConsultationSubscriptionService.setActive(true);
           _playSubscriptionVerified = true;
           onSubscriptionUpdated?.call(true, bonusTickets: result.bonusTickets);
@@ -311,45 +364,107 @@ class IAPService {
         if (result.ticketsGranted > 0) {
           onTicketsGranted?.call(
             result.ticketsGranted,
-            productId,
+            canonicalId,
             isUrgent: result.isUrgent,
           );
+          BillingLog.info('iap ticketsGranted backup return');
+          unawaited(AppNavigation.completeTicketPackPurchaseFromStore());
         }
       }
+    }
+  }
+
+  /// Android: acknowledgePurchase / completePurchase（消耗型は autoConsume）。
+  Future<void> _acknowledgeIfNeeded(PurchaseDetails purchase, {bool fromRestore = false}) async {
+    if (!purchase.pendingCompletePurchase) return;
+    try {
+      await _iap.completePurchase(purchase);
+      BillingLog.purchase(
+        'acknowledged product=${purchase.productID} restore=$fromRestore',
+      );
+    } catch (e, st) {
+      BillingLog.error('completePurchase failed', e, st);
     }
   }
 
   Future<({int ticketsGranted, int bonusTickets, bool isUrgent})> _grantBenefitIfNew(
     PurchaseDetails purchase,
   ) async {
-    final purchaseId = purchase.purchaseID ?? '${purchase.productID}_${purchase.transactionDate}';
+    final productId = purchase.productID;
+    final purchaseId = purchase.purchaseID ?? '${productId}_${purchase.transactionDate}';
     final isNew = await IapPurchaseAckStore.markProcessedIfNew(purchaseId);
-    if (!isNew) return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
+    if (!isNew) {
+      BillingLog.info('skip duplicate purchaseId=$purchaseId');
+      return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
+    }
 
-    if (ConsultationSubscriptionConfig.isSubscriptionProduct(purchase.productID)) {
+    final token = _extractPurchaseToken(purchase);
+    final orderId = _extractOrderId(purchase);
+    final timeMs = _extractPurchaseTimeMs(purchase);
+    final isSub = PlayBillingProducts.isSubscriptionProduct(productId);
+
+    unawaited(
+      BillingServerSyncService.syncPurchase(
+        productId: productId,
+        purchaseId: purchaseId,
+        purchaseToken: token,
+        orderId: orderId,
+        purchaseTimeMs: timeMs,
+        isSubscription: isSub,
+        isRestore: purchase.status == PurchaseStatus.restored,
+      ),
+    );
+
+    if (isSub) {
       final bonus = await SubscriptionBonusService.grantFirstBonusIfEligible();
-      BillingLog.info('subscription active, first bonus=$bonus');
+      BillingLog.purchase('subscription active firstBonus=$bonus');
       return (ticketsGranted: bonus, bonusTickets: bonus, isUrgent: false);
     }
 
-    final pack = ConsultationTicketPacksService.getPackById(purchase.productID);
+    final pack = ConsultationTicketPacksService.getPackById(productId);
     if (pack == null || pack.tickets <= 0) {
+      BillingLog.warn('unknown consumable product=$productId');
       return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
     }
 
     if (pack.isUrgent) {
       await ConsultationTicketService.addPriorityTickets(pack.tickets);
-      BillingLog.info('granted urgent ${pack.tickets}');
+      BillingLog.purchase('granted urgent ${pack.tickets}');
       return (ticketsGranted: pack.tickets, bonusTickets: 0, isUrgent: true);
     }
 
     await ConsultationTicketService.addNormalTickets(pack.tickets);
-    BillingLog.info('granted normal ${pack.tickets}');
+    BillingLog.purchase('granted normal ${pack.tickets}');
     return (ticketsGranted: pack.tickets, bonusTickets: 0, isUrgent: false);
+  }
+
+  static String? _extractPurchaseToken(PurchaseDetails purchase) {
+    if (Platform.isAndroid && purchase is GooglePlayPurchaseDetails) {
+      return purchase.billingClientPurchase.purchaseToken;
+    }
+    return null;
+  }
+
+  static String? _extractOrderId(PurchaseDetails purchase) {
+    if (Platform.isAndroid && purchase is GooglePlayPurchaseDetails) {
+      return purchase.billingClientPurchase.orderId;
+    }
+    return purchase.purchaseID;
+  }
+
+  static int? _extractPurchaseTimeMs(PurchaseDetails purchase) {
+    if (Platform.isAndroid && purchase is GooglePlayPurchaseDetails) {
+      return purchase.billingClientPurchase.purchaseTime;
+    }
+    final raw = purchase.transactionDate;
+    if (raw == null) return null;
+    final parsed = int.tryParse(raw);
+    return parsed;
   }
 
   void _handleError(Object error) {
     BillingLog.error('purchase stream error', error);
+    onPurchaseFailed?.call('', PlayBillingErrorMapper.userMessage(error));
   }
 
   void dispose() {
@@ -357,6 +472,7 @@ class IAPService {
     onTicketsGranted = null;
     onPurchaseCanceled = null;
     onPurchaseFailed = null;
+    onPurchasePending = null;
     onSubscriptionUpdated = null;
   }
 }

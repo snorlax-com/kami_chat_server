@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'package:kami_face_oracle/config/play_billing_products.dart';
+
 /// Google Play 月額サブスクリプション定義。
 class ConsultationSubscriptionPlan {
   const ConsultationSubscriptionPlan({
@@ -30,9 +32,9 @@ class ConsultationSubscriptionConfig {
   static const _assetPath = 'assets/data/consultation_subscription.json';
 
   static const ConsultationSubscriptionPlan _fallback = ConsultationSubscriptionPlan(
-    productId: 'monthly_subscription_500',
+    productId: PlayBillingProducts.subscriptionMonthly500,
     name: '月額サブスク',
-    description: '質問機能を利用するにはサブスク加入が必要です。初回加入時に通常質問1回券をプレゼントします。',
+    description: '質問機能を利用するにはサブスク加入が必要です。初回加入時に質問券1枚をプレゼントします。',
     priceYen: 500,
     billingPeriodLabel: '月',
     firstBonusNormalTickets: 1,
@@ -44,7 +46,7 @@ class ConsultationSubscriptionConfig {
 
   static String get productId => plan.productId;
 
-  static bool isSubscriptionProduct(String id) => id == productId;
+  static bool isSubscriptionProduct(String id) => PlayBillingProducts.isSubscriptionProduct(id);
 
   static Future<void> ensureLoaded() async {
     if (_loaded != null) return;

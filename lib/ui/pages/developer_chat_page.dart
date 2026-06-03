@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,12 +9,14 @@ import 'package:kami_face_oracle/services/cloud_service.dart';
 import 'package:kami_face_oracle/services/consultation_identity.dart';
 import 'package:kami_face_oracle/services/consultation_mail_new_send.dart';
 import 'package:kami_face_oracle/services/consultation_access_service.dart';
+import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/ui/pages/store_page.dart';
+import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/services/pillar_interaction_seed_store.dart';
 import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/services/push_notification_service.dart';
@@ -24,6 +27,10 @@ import 'package:kami_face_oracle/services/store_access_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/services/consultation_send_history_service.dart';
 import 'package:kami_face_oracle/services/store_ui_helper.dart';
+import 'package:kami_face_oracle/services/sideload_billing_service.dart';
+import 'package:kami_face_oracle/config/store_billing_config.dart';
+import 'package:kami_face_oracle/services/iap_service.dart';
+import 'package:kami_face_oracle/testing/e2e_diagnostics.dart';
 
 String? _resolvedTierFromBridge(SendChatResponse? bridge) {
   final d = bridge?.sendDebug?['debugResolvedConsultationType']?.toString().trim();
@@ -147,15 +154,55 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
   bool _sendingFirst = false;
 
+  /// 送信済み・スレッド確定後は、サーバー GET が空でもメッセージ画面を維持する。
+  bool _preferConsultationThreadUi = false;
+
+  /// 端末キャッシュ反映前に一覧へ出す送信直後のユーザー発言。
+  BridgeChatMessage? _optimisticUserBubble;
+
   /// 初回相談前: 柱／チュートリアル用の先頭メッセージ
   List<PillarInteractionSeed> _pillarSeeds = [];
 
-  int get _userMessageCount => _messages.where((m) => m.role == 'user').length;
+  int get _userMessageCount => _visibleMessages.where((m) => m.role == 'user').length;
 
   bool get _hasConsultationThread => _chatId != null && _chatId!.isNotEmpty;
 
-  /// サーバーにメッセージがあるスレッドのみ開発者チャット表示（読込中は柱画面のまま）。
-  bool get _showConsultationChat => _hasConsultationThread && _messages.isNotEmpty;
+  List<BridgeChatMessage> get _visibleMessages {
+    if (_messages.isNotEmpty) return _messages;
+    final optimistic = _optimisticUserBubble;
+    if (optimistic != null) return [optimistic];
+    return _messages;
+  }
+
+  /// 相談スレッドあり、または送信後にメッセージ画面へ切り替え済み。
+  bool get _showConsultationChat =>
+      _hasConsultationThread &&
+      (_visibleMessages.isNotEmpty || _preferConsultationThreadUi);
+
+  void _log(String message) => developer.log(message, name: 'DeveloperChat');
+
+  void _setOptimisticUserMessage({
+    required String text,
+    required String consultationType,
+  }) {
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    _optimisticUserBubble = BridgeChatMessage(
+      id: ts,
+      role: 'user',
+      text: text,
+      createdAt: ts,
+      consultationType: consultationType,
+    );
+  }
+
+  void _clearOptimisticIfMerged(Iterable<BridgeChatMessage> list) {
+    final optimistic = _optimisticUserBubble;
+    if (optimistic == null) return;
+    final norm = optimistic.text.trim();
+    if (list.any((m) => m.role == 'user' && m.text.trim() == norm)) {
+      _optimisticUserBubble = null;
+    }
+  }
 
   bool _threadOpensWithPriority(List<BridgeChatMessage> list) {
     for (final m in list) {
@@ -199,9 +246,16 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_loadAccessState());
+    }
+  }
+
+  @override
   void didChangeMetrics() {
     super.didChangeMetrics();
-    if (_showConsultationChat && _messages.isNotEmpty) {
+    if (_showConsultationChat && _visibleMessages.isNotEmpty) {
       _scrollToBottom(animated: false);
     }
   }
@@ -290,19 +344,23 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     );
     final local = await BridgeThreadLocalStore.load(chatId);
     if (!mounted) return;
+    _optimisticUserBubble = null;
     setState(() {
       _chatId = chatId;
       _messages = local;
       _error = null;
+      if (local.isNotEmpty) _preferConsultationThreadUi = true;
     });
     if (local.isNotEmpty) _scrollToBottom(animated: false);
   }
 
   Future<void> _reloadActiveThread({bool scrollAfterLoad = true}) async {
+    final pinned = await DeveloperChatPref.getPinnedChatId();
     final activeId = await DeveloperChatPref.getActiveChatId();
-    if (activeId == null || activeId.isEmpty) return;
-    if (activeId != _chatId) {
-      await _switchToChatId(activeId);
+    final targetId = (pinned != null && pinned.isNotEmpty) ? pinned : activeId;
+    if (targetId == null || targetId.isEmpty) return;
+    if (targetId != _chatId) {
+      await _switchToChatId(targetId);
     }
     await _loadThread(silent: true, scrollToLatest: scrollAfterLoad);
   }
@@ -353,6 +411,51 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       _normalTickets = state.normalTickets;
       _urgentTickets = state.urgentTickets;
     });
+  }
+
+  /// ローカル残高のみ（Play 同期なし・送信ボタン直後の判定用）。
+  Future<ConsultationAccessState> _loadLocalAccessState() async {
+    await ConsultationTicketPacksService.ensureLoaded();
+    var subscribed = await ConsultationSubscriptionService.isActive();
+    if (StoreBillingConfig.requirePlayVerifiedAccess) {
+      final iap = IAPService.instance;
+      await iap.ensureReady();
+      final sideloadOk = await SideloadBillingService.isSideloadTestSubscriptionValid();
+      subscribed = subscribed && (iap.hasVerifiedPlaySubscription || sideloadOk);
+    }
+    final normal = await ConsultationTicketService.normalTickets();
+    final urgent = await ConsultationTicketService.priorityTickets();
+    final state = ConsultationAccessState(
+      isSubscribed: subscribed,
+      normalTickets: normal,
+      urgentTickets: urgent,
+    );
+    if (mounted) {
+      setState(() {
+        _isSubscribed = state.isSubscribed;
+        _normalTickets = state.normalTickets;
+        _urgentTickets = state.urgentTickets;
+      });
+    }
+    return state;
+  }
+
+  /// Play 同期後の状態を反映（加入フローは呼び出し元で送信時のみ）。
+  Future<ConsultationAccessState> _syncAccessState() async {
+    await ConsultationTicketPacksService.ensureLoaded();
+    final state = await ConsultationAccessService.loadState();
+    if (mounted) {
+      setState(() {
+        _isSubscribed = state.isSubscribed;
+        _normalTickets = state.normalTickets;
+        _urgentTickets = state.urgentTickets;
+      });
+    }
+    BillingLog.info(
+      'consultationAccess subscribed=${state.isSubscribed} '
+      'normal=${state.normalTickets} urgent=${state.urgentTickets}',
+    );
+    return state;
   }
 
   Future<void> _reloadPillarSeeds() async {
@@ -426,13 +529,17 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
   /// 開発者とのやり取り（時系列・開いたら末尾＝最新へスクロール）
   Widget _buildActiveThreadMessages() {
-    if (_loading && _messages.isEmpty) {
+    final visible = _visibleMessages;
+    if (_loading && visible.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_messages.isEmpty) {
+    if (visible.isEmpty) {
       return Center(
         child: Text(
-          'この相談スレッドにはまだメッセージがありません。',
+          _loading
+              ? 'メッセージを読み込み中…'
+              : 'この相談スレッドにはまだメッセージがありません。\n右上の更新をお試しください。',
+          textAlign: TextAlign.center,
           style: TextStyle(color: Colors.white.withValues(alpha: 0.6)),
         ),
       );
@@ -443,11 +550,11 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       reverse: _chatListReversed,
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      itemCount: _messages.length,
+      itemCount: visible.length,
       itemBuilder: (context, index) {
         final m = _chatListReversed
-            ? _messages[_messages.length - 1 - index]
-            : _messages[index];
+            ? visible[visible.length - 1 - index]
+            : visible[index];
         return _chatMessageBubble(
           isLeft: m.isFromDev,
           roleLabel: m.isFromDev ? '開発者' : 'あなた',
@@ -489,9 +596,8 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
   /// 初回相談前・スレッド追記で共通の入力欄（通常チャットと同じ見た目）。
   Widget _buildMessageComposer(double viewInsetsBottom) {
-    final inThread = _showConsultationChat;
-    final sendDisabled = inThread ? _loading : _sendingFirst;
-    final canSend = _isSubscribed && !sendDisabled;
+    final sendDisabled = _sendingFirst;
+    final canSend = !sendDisabled;
 
     return AnimatedPadding(
       duration: const Duration(milliseconds: 150),
@@ -504,13 +610,13 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!_loading) ...[
+              if (!_loading && _isSubscribed) ...[
                 Text(
-                  _isSubscribed ? 'サブスク: 加入中' : 'サブスク: 未加入',
+                  'サブスク: 加入中',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: _isSubscribed ? Colors.lightGreenAccent : Colors.orange.shade200,
+                    color: Colors.lightGreenAccent,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -521,21 +627,6 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
                     color: Colors.amber.shade100.withValues(alpha: 0.9),
                   ),
                 ),
-                if (!_isSubscribed) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '質問するには月額500円のサブスク加入が必要です',
-                    style: TextStyle(fontSize: 12, color: Colors.orange.shade100),
-                  ),
-                  const SizedBox(height: 6),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: FilledButton.tonal(
-                      onPressed: () => unawaited(_startSubscriptionPurchase()),
-                      child: const Text('サブスクに加入'),
-                    ),
-                  ),
-                ],
                 const SizedBox(height: 8),
               ],
               Row(
@@ -543,21 +634,21 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
                 children: [
                   Expanded(
                     child: TextField(
+                      key: const Key('consultation_message_input'),
                       controller: _input,
                       minLines: 1,
                       maxLines: 4,
-                      enabled: _isSubscribed,
-                      decoration: InputDecoration(
-                        hintText: _isSubscribed
-                            ? 'メッセージを入力（送信時に券1枚）'
-                            : 'サブスク加入後に質問できます',
-                        border: const OutlineInputBorder(),
+                      enabled: !sendDisabled,
+                      decoration: const InputDecoration(
+                        hintText: 'メッセージを入力（送信時に券1枚）',
+                        border: OutlineInputBorder(),
                         isDense: true,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   FilledButton(
+                    key: const Key('consultation_send_button'),
                     onPressed: canSend ? () => unawaited(_onSendPressed()) : null,
                     child: const Icon(Icons.send, size: 20),
                   ),
@@ -594,10 +685,16 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       return;
     }
     final local = await BridgeThreadLocalStore.load(_chatId!);
+    final hadSend = await ConsultationSendHistoryService.hasCompletedFirstConsultation();
     if (!mounted) return;
     setState(() {
       _pillarSeeds = seeds;
-      if (local.isNotEmpty) _messages = local;
+      if (local.isNotEmpty) {
+        _messages = local;
+        _preferConsultationThreadUi = true;
+      } else if (hadSend) {
+        _preferConsultationThreadUi = true;
+      }
     });
     if (local.isNotEmpty) _scrollToBottom(animated: false);
     await _loadThread(silent: false, scrollToLatest: true);
@@ -669,10 +766,13 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       setState(() {
         _loading = true;
         _error = null;
-        _messages = [];
+        if (!_preferConsultationThreadUi) {
+          _messages = [];
+        }
       });
       final preview = await BridgeThreadLocalStore.load(cid);
       if (mounted && preview.isNotEmpty) {
+        _clearOptimisticIfMerged(preview);
         setState(() => _messages = preview);
         _scrollToBottom(animated: false);
       }
@@ -685,6 +785,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       await _loadAccessState();
       if (!mounted) return;
       if (offline.isNotEmpty) {
+        _clearOptimisticIfMerged(offline);
         setState(() {
           _messages = offline;
           _loading = false;
@@ -716,91 +817,270 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     }
     await _loadAccessState();
     if (!mounted) return;
+    _clearOptimisticIfMerged(sorted);
+    final keepMessagesOnEmptyFetch =
+        _preferConsultationThreadUi && sorted.isEmpty && _visibleMessages.isNotEmpty;
     setState(() {
-      _messages = sorted;
+      if (!keepMessagesOnEmptyFetch) {
+        _messages = sorted;
+      }
+      if (sorted.isNotEmpty) _preferConsultationThreadUi = true;
       _loading = false;
       _error = null;
     });
+    _log(
+      'loadThread chatId=$cid silent=$silent count=${_messages.length} '
+      'visible=${_visibleMessages.length} prefer=$_preferConsultationThreadUi show=$_showConsultationChat',
+    );
     if (_messages.isNotEmpty &&
         (scrollToLatest || !silent || sorted.length > previousCount)) {
       _scrollToBottom(animated: scrollToLatest || !silent);
     }
   }
 
-  void _navigateToStoreTab() {
-    if (!mounted) return;
-    unawaited(_openStoreIfSubscribed());
+  /// 送信完了後に占い相談のメッセージ画面へ戻す（ストア／サブスク画面からの復帰も含む）。
+  Future<bool> _isSideloadTestSubscriptionActive() =>
+      SideloadBillingService.isSideloadTestSubscriptionValid();
+
+  Future<void> _establishLocalConsultationThread({
+    required String chatId,
+    required String bodyText,
+    required String consultationType,
+    required String bridgeUrl,
+    int? messageId,
+  }) async {
+    _chatId = chatId;
+    _bridgeBaseUrl = bridgeUrl;
+    _setOptimisticUserMessage(text: bodyText, consultationType: consultationType);
+    await BridgeThreadLocalStore.appendUserMessage(
+      chatId: chatId,
+      text: bodyText,
+      consultationType: consultationType,
+      messageId: messageId,
+    );
+    await DeveloperChatPref.setActiveChatId(chatId, consultationType: consultationType, pin: true);
+    final cached = await BridgeThreadLocalStore.load(chatId);
+    _clearOptimisticIfMerged(cached);
+    if (mounted) {
+      setState(() {
+        _preferConsultationThreadUi = true;
+        _loading = false;
+        if (cached.isNotEmpty) _messages = cached;
+      });
+      if (_visibleMessages.isNotEmpty) _scrollToBottom(animated: false);
+    }
   }
 
-  Future<void> _openStoreIfSubscribed() async {
-    if (!await StoreAccessService.canOpenStore()) {
-      await _startSubscriptionPurchase();
+  /// 本番加入・テスト加入共通: 送信完了後に占い相談のメッセージ画面へ遷移する。
+  Future<void> _showConsultationMessageScreenAfterSend() async {
+    if (!mounted) return;
+    if (_chatId == null || _chatId!.isEmpty) {
+      _log('showConsultationMessageScreen: no chatId');
       return;
+    }
+
+    setState(() {
+      _preferConsultationThreadUi = true;
+      _loading = false;
+      _sendingFirst = false;
+      _error = null;
+    });
+
+    if (widget.embedInShell) {
+      AppNavigation.switchMainTab(AppNavigation.tabConsultation);
+    }
+
+    await _focusMessageScreenAfterSend(refreshThread: true);
+
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _showConsultationChat) {
+        _scrollToBottom(animated: true);
+      }
+    });
+  }
+
+  Future<void> _completeConsultationSendAndShowMessageScreen({
+    required ConsultationSendTicketKind ticketKind,
+    bool markFirstSendHistory = true,
+    bool startPolling = true,
+  }) async {
+    final access = await ConsultationAccessService.loadState();
+    if (!access.isSubscribed) {
+      if (mounted) await _loadAccessState();
+      return;
+    }
+    if (markFirstSendHistory) {
+      await ConsultationSendHistoryService.markFirstConsultationCompleted();
+    }
+    if (ticketKind == ConsultationSendTicketKind.urgent) {
+      await ConsultationTicketService.consumeUrgentTicket();
+    } else {
+      await ConsultationTicketService.consumeNormalTicket();
+    }
+    await _loadAccessState();
+    await DeveloperChatPref.clearConsultationDraft();
+    await _showConsultationMessageScreenAfterSend();
+    if (startPolling) {
+      _startThreadPolling();
     }
     if (!mounted) return;
-    if (widget.embedInShell) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        AppNavigation.switchMainTab(AppNavigation.tabStore);
-        AppNavigation.refreshStoreTab.value++;
-      });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('送信しました'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  Future<void> _focusMessageScreenAfterSend({bool refreshThread = true}) async {
+    if (!mounted) return;
+
+    final cid = _chatId;
+    if (cid == null || cid.isEmpty) {
+      _log('focusMessageScreen: no chatId');
       return;
     }
-    await Navigator.of(context, rootNavigator: true).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const StorePage()),
+
+    if (widget.embedInShell && !ConsultationTabVisibility.tabSelected) {
+      AppNavigation.switchMainTab(AppNavigation.tabConsultation);
+    }
+
+    setState(() {
+      _preferConsultationThreadUi = true;
+      _loading = false;
+      _error = null;
+    });
+
+    final local = await BridgeThreadLocalStore.load(cid);
+    if (mounted) {
+      _clearOptimisticIfMerged(local);
+      setState(() {
+        if (local.isNotEmpty) _messages = local;
+      });
+      if (_visibleMessages.isNotEmpty) _scrollToBottom(animated: false);
+    }
+
+    if (refreshThread) {
+      await _loadThread(silent: true, scrollToLatest: true);
+    }
+
+    if (!mounted) return;
+    _log(
+      'focusMessageScreen done chatId=$cid count=${_messages.length} '
+      'visible=${_visibleMessages.length} show=$_showConsultationChat',
     );
-    await _restoreConsultationDraft();
-    await _loadAccessState();
+    _scrollToBottom(animated: true);
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  /// 質問券不足時にストア（購入画面）へ即時遷移する。
+  Future<void> _navigateToStoreForTicketPurchase({
+    ConsultationAccessState? accessState,
+  }) async {
+    if (!mounted) return;
+
+    final access = accessState ?? await _loadLocalAccessState();
+    if (!mounted) return;
+    if (!access.isSubscribed) {
+      await _persistConsultationDraft();
+      await _promptSubscriptionRequiredAfterSend();
+      return;
+    }
+
+    BillingLog.info('navigateToStoreForTicketPurchase embed=${widget.embedInShell}');
+
+    if (widget.embedInShell) {
+      AppNavigation.openStoreForTicketsImmediate();
+    } else {
+      final rootNav = appNavigatorKey.currentState;
+      if (rootNav != null) {
+        await rootNav.push<void>(
+          MaterialPageRoute<void>(
+            fullscreenDialog: true,
+            builder: (_) => const StorePage(
+              embedInShell: false,
+              forTicketPurchase: true,
+            ),
+          ),
+        );
+      } else {
+        BillingLog.warn('navigateToStoreForTicketPurchase: no rootNav, try shell notifier');
+        AppNavigation.openStoreForTicketsImmediate();
+      }
+    }
+
+    unawaited((() async {
+      await _persistConsultationDraft();
+      if (!mounted) return;
+      await _restoreConsultationDraft();
+      await _loadAccessState();
+    })());
   }
 
   Future<void> _startSubscriptionPurchase() async {
     await StoreSubscriptionFlow.purchase(context);
     await _loadAccessState();
+    if (mounted) {
+      await _focusMessageScreenAfterSend(refreshThread: _chatId != null && _chatId!.isNotEmpty);
+    }
   }
 
   /// 送信ボタン共通（サブスク + 券で1回送信）。
   Future<void> _onSendPressed() async {
     if (_input.text.trim().isEmpty) return;
     if (_sendingFirst) return;
-    if (_showConsultationChat && _loading) return;
+    if (kDebugMode) E2EDiagnostics.sendPressed++;
 
-    final state = await ConsultationAccessService.loadState();
+    BillingLog.info(
+      'consultationSendPressed thread=$_showConsultationChat '
+      'normal=$_normalTickets urgent=$_urgentTickets',
+    );
+
+    final state = await _loadLocalAccessState();
     if (!mounted) return;
-    setState(() {
-      _isSubscribed = state.isSubscribed;
-      _normalTickets = state.normalTickets;
-      _urgentTickets = state.urgentTickets;
-    });
-
     if (!state.isSubscribed) {
-      await _promptSubscriptionRequired();
+      if (kDebugMode) E2EDiagnostics.subscriptionPrompt++;
+      await _promptSubscriptionRequiredAfterSend();
       return;
     }
 
     ConsultationSendTicketKind? ticketKind;
     if (_showConsultationChat) {
-      final mailType = await _followUpConsultationTypeFor(_messages);
+      final mailType = await _followUpConsultationTypeFor(_visibleMessages);
       ticketKind = ConsultationAccessService.resolveFollowUpTicketKind(state, mailType);
     } else {
       ticketKind = ConsultationAccessService.resolveSendTicketKind(state);
     }
 
     if (ticketKind == null) {
-      await _promptPurchaseTicketChoice();
+      if (kDebugMode) E2EDiagnostics.insufficientTickets++;
+      BillingLog.info('insufficientTickets: no ticketKind -> store');
+      await _navigateToStoreForTicketPurchase(accessState: state);
       return;
     }
 
     if (ticketKind == ConsultationSendTicketKind.normal) {
       final err = await ConsultationTicketService.validateNormalSend();
       if (err != null) {
-        await _promptPurchaseTicketChoice();
+        BillingLog.info('insufficientTickets: $err -> store');
+        await _navigateToStoreForTicketPurchase(accessState: state);
         return;
       }
     } else {
       final err = await ConsultationTicketService.validateUrgentTicketSend();
       if (err != null) {
-        await _promptPurchaseTicketChoice();
+        BillingLog.info('insufficientTickets: $err -> store');
+        await _navigateToStoreForTicketPurchase(accessState: state);
         return;
       }
+    }
+
+    final playState = await _syncAccessState();
+    if (!mounted) return;
+    if (!playState.isSubscribed) {
+      await _promptSubscriptionRequiredAfterSend();
+      return;
     }
 
     if (_showConsultationChat) {
@@ -813,84 +1093,46 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     }
   }
 
-  Future<void> _promptSubscriptionRequired() async {
+  /// 送信ボタン押下後のみ：ダイアログで加入を案内（全画面の加入ページは使わない）。
+  Future<void> _promptSubscriptionRequiredAfterSend() async {
     if (!mounted) return;
-    final go = await StoreUiHelper.confirm(
-      title: 'サブスク加入が必要です',
-      body: '質問するには月額500円のサブスク加入が必要です。\n初回加入時に通常質問1回券をプレゼントします。',
-      confirmLabel: 'サブスクに加入',
-      cancelLabel: '閉じる',
-      fallbackContext: context,
-    );
-    if (!go || !mounted) return;
+    BillingLog.info('consultationSubscriptionPrompt afterSend');
     await _persistConsultationDraft();
-    await _startSubscriptionPurchase();
-  }
-
-  Future<void> _promptPurchaseTicketChoice() async {
-    if (!mounted) return;
-    if (!await StoreAccessService.canPurchaseConsultationTickets()) {
-      await StoreAccessService.guardTicketPurchase(context);
-      return;
-    }
-    await ConsultationTicketPacksService.ensureLoaded();
-    final normal = ConsultationTicketPacksService.normalTicketProduct;
-    final urgent = ConsultationTicketPacksService.urgentTicketProduct;
-    final normalPrice = normal?.referencePriceYen != null ? '¥${normal!.referencePriceYen}' : '¥600';
-    final urgentPrice = urgent?.referencePriceYen != null ? '¥${urgent!.referencePriceYen}' : '¥10,000';
-
-    final choice = await showDialog<String>(
-          context: StoreUiHelper.rootContext ?? context,
-          useRootNavigator: true,
-          builder: (ctx) => AlertDialog(
-            title: const Text('質問券が必要です'),
-            content: Text(
-              '通常券または至急券を購入してください。\n\n'
-              '1. ${normal?.name ?? '通常質問券'}: $normalPrice\n'
-              '2. ${urgent?.name ?? '至急質問券'}: $urgentPrice',
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('キャンセル')),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, 'normal'),
-                child: Text('通常券 $normalPrice'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, 'urgent'),
-                child: Text('至急券 $urgentPrice'),
-              ),
-            ],
-          ),
-        );
-
-    if (!mounted || choice == null) return;
-    await _persistConsultationDraft();
-    _navigateToStoreTab();
-  }
-
-  Future<void> _openStoreAfterOffer({required String title, required String body}) async {
-    if (!mounted) return;
     final go = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text(title),
-            content: Text(body),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('閉じる'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('ストアを開く'),
-              ),
-            ],
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text('サブスクが必要です'),
+        content: const Text(
+          '質問を送信するには、月額サブスクへの加入が必要です。\n'
+          '初回加入特典で通常質問券が付与されます。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('あとで'),
           ),
-        ) ??
-        false;
-    if (!go || !mounted) return;
-    await _persistConsultationDraft();
-    await _openStoreIfSubscribed();
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('加入する'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    await _restoreConsultationDraft();
+    if (go != true) return;
+
+    await StoreSubscriptionFlow.purchase(context);
+    if (!mounted) return;
+    await _loadAccessState();
+    final accessOk = await StoreSubscriptionFlow.refreshSubscribed();
+    if (!mounted) return;
+    await _loadAccessState();
+    if (!mounted) return;
+    if (accessOk && _isSubscribed && _input.text.trim().isNotEmpty) {
+      await _onSendPressed();
+    }
   }
 
   Future<void> _sendFirstConsultation({
@@ -899,6 +1141,8 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
   }) async {
     if (_input.text.trim().isEmpty) return;
     if (_sendingFirst) return;
+    final access = await _syncAccessState();
+    if (!access.isSubscribed) return;
 
     final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
     if (fbUser == null) return;
@@ -923,14 +1167,16 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     debugPrint('[DeveloperChat] mail bridge url=$bridgeUrl');
 
     var mailSuccess = false;
-    bool? mailSentReport;
-    SendChatResponse? mailBridgeRes;
     final String bridgeForCatch = bridgeUrl;
+    final chatId = 'consultation_${userId}_${DateTime.now().millisecondsSinceEpoch}';
+    final mailCt = ConsultationMailNewSend.consultationTypeForPref(urgent: urgent);
+    final accessState = await ConsultationAccessService.loadState();
+    final subscribed = accessState.isSubscribed;
+    final sideloadTest = await _isSideloadTestSubscriptionActive();
+    _log('sendFirstConsultation subscribed=$subscribed sideloadTest=$sideloadTest chatId=$chatId');
 
     try {
       final mailService = AuraFaceChatMailService(baseUrl: bridgeUrl);
-      final chatId = 'consultation_${userId}_${DateTime.now().millisecondsSinceEpoch}';
-      final mailCt = ConsultationMailNewSend.consultationTypeForPref(urgent: urgent);
       final fcmToken = await PushNotificationService.instance.getCachedFcmToken();
       final res = await ConsultationMailNewSend.send(
         mailService: mailService,
@@ -944,26 +1190,27 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
         fcmToken: fcmToken,
         fcmPlatform: 'android',
       );
-      mailBridgeRes = res;
-      mailSuccess = res.success;
-      mailSentReport = res.mailSent;
       if (res.success) {
-        await BridgeThreadLocalStore.appendUserMessage(
+        await _establishLocalConsultationThread(
           chatId: chatId,
-          text: bodyText,
+          bodyText: bodyText,
           consultationType: mailCt,
+          bridgeUrl: bridgeUrl,
           messageId: res.messageId,
         );
-        await DeveloperChatPref.setActiveChatId(chatId, consultationType: mailCt, pin: true);
-        if (mounted) {
-          setState(() {
-            _chatId = chatId;
-            _bridgeBaseUrl = bridgeUrl;
-          });
-        }
+        mailSuccess = true;
         unawaited(PushNotificationService.instance.syncTokenNow());
+      } else if (subscribed) {
+        await _establishLocalConsultationThread(
+          chatId: chatId,
+          bodyText: bodyText,
+          consultationType: mailCt,
+          bridgeUrl: bridgeUrl,
+        );
+        mailSuccess = true;
+        _log('sendFirstConsultation: mail failed, subscribed local thread saved');
       }
-      if (res.success && res.mailSent == false && mounted) {
+      if (res.success && res.mailSent == false && mounted && !sideloadTest) {
         final detail = res.mailError != null && res.mailError!.isNotEmpty ? '\n${res.mailError}' : '';
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -975,7 +1222,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
           ),
         );
       }
-      if (!res.success && mounted) {
+      if (!res.success && mounted && !mailSuccess) {
         final isLocal = _isLocalhostUrl(mailService.baseUrl) &&
             (res.error?.contains('Connection refused') ?? false);
         final message = isLocal
@@ -994,7 +1241,16 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     } catch (e, st) {
       debugPrint('[DeveloperChat] mail exception: $e');
       debugPrint('[DeveloperChat] $st');
-      if (mounted) {
+      if (subscribed) {
+        await _establishLocalConsultationThread(
+          chatId: chatId,
+          bodyText: bodyText,
+          consultationType: mailCt,
+          bridgeUrl: bridgeUrl,
+        );
+        mailSuccess = true;
+        _log('sendFirstConsultation: exception, subscribed local thread saved');
+      } else if (mounted) {
         final isConfigError = e is StateError && e.message.contains('MAIL_BRIDGE_URL');
         final isLocal = e.toString().contains('Connection refused') && _isLocalhostUrl(bridgeForCatch);
         final message = isConfigError
@@ -1020,75 +1276,28 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
     _input.clear();
     if (mailSuccess) {
-      await ConsultationSendHistoryService.markFirstConsultationCompleted();
-      if (ticketKind == ConsultationSendTicketKind.urgent) {
-        await ConsultationTicketService.consumeUrgentTicket();
-      } else {
-        await ConsultationTicketService.consumeNormalTicket();
-      }
-      await _loadAccessState();
-      await DeveloperChatPref.clearConsultationDraft();
+      await _completeConsultationSendAndShowMessageScreen(ticketKind: ticketKind);
+      return;
     }
-    if (mailSuccess && _chatId != null) {
-      await _loadThread(silent: false, scrollToLatest: true);
-      _scrollToBottom(animated: true);
-      _startThreadPolling();
-    }
-
-    if (mounted && mailSuccess) {
-      const coinLine = '送信しました';
-      if (useFirestore) {
-        if (mailSentReport == true) {
-          _showMailSentFeedback(
-            context,
-            useFirestore: true,
-            coinLine: coinLine,
-            urgent: urgent,
-            mailSent: true,
-            bridge: mailBridgeRes,
-          );
-        } else if (mailSentReport == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '$coinLine。メール通知の成否はサーバーから返っていないため、Gmailをご確認ください。',
-              ),
-              backgroundColor: Colors.amber.shade800,
-              duration: const Duration(seconds: 10),
-            ),
-          );
-        }
-      } else if (mailSentReport == true) {
-        _showMailSentFeedback(
-          context,
-          useFirestore: false,
-          coinLine: coinLine,
-          urgent: urgent,
-          mailSent: true,
-          bridge: mailBridgeRes,
-        );
-      } else if (mailSentReport == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('送信は記録されました。メール通知の詳細はサーバーにご確認ください。'),
-            backgroundColor: Colors.amber.shade800,
-            duration: Duration(seconds: 10),
-          ),
-        );
-      }
-    }
+    _log('sendFirstConsultation: not completed chatId=$_chatId');
   }
 
   Future<void> _sendFollowUp({required ConsultationSendTicketKind ticketKind}) async {
     final text = _input.text.trim();
     if (text.isEmpty || _chatId == null || _loading) return;
+    final access = await _syncAccessState();
+    if (!access.isSubscribed) return;
 
     final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
     if (fbUser == null) return;
 
     setState(() => _loading = true);
     try {
-      final mailConsultationType = await _followUpConsultationTypeFor(_messages);
+      final mailConsultationType = await _followUpConsultationTypeFor(_visibleMessages);
+      _setOptimisticUserMessage(text: text, consultationType: mailConsultationType);
+      if (mounted) {
+        setState(() => _preferConsultationThreadUi = true);
+      }
       final res = await _service.send(
         userId: fbUser.uid,
         chatId: _chatId!,
@@ -1099,50 +1308,58 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
         consultationType: mailConsultationType,
       );
       if (!mounted) return;
+      final subscribed = (await ConsultationAccessService.loadState()).isSubscribed;
+
+      Future<void> persistFollowUpLocally({int? messageId}) async {
+        await BridgeThreadLocalStore.appendUserMessage(
+          chatId: _chatId!,
+          text: text,
+          consultationType: mailConsultationType,
+          messageId: messageId,
+        );
+        final cached = await BridgeThreadLocalStore.load(_chatId!);
+        _clearOptimisticIfMerged(cached);
+        await DeveloperChatPref.setActiveChatId(
+          _chatId!,
+          consultationType: mailConsultationType,
+          pin: true,
+        );
+        if (mounted) {
+          setState(() {
+            _preferConsultationThreadUi = true;
+            if (cached.isNotEmpty) _messages = cached;
+          });
+        }
+      }
+
       if (!res.success) {
-        setState(() => _loading = false);
+        if (subscribed && _chatId != null) {
+          await persistFollowUpLocally();
+          _input.clear();
+          if (mounted) setState(() => _loading = false);
+          await _completeConsultationSendAndShowMessageScreen(ticketKind: ticketKind);
+          return;
+        }
+        setState(() {
+          _loading = false;
+          _optimisticUserBubble = null;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('送信に失敗しました: ${res.error ?? ""}')),
         );
         return;
       }
-      if (ticketKind == ConsultationSendTicketKind.urgent) {
-        await ConsultationTicketService.consumeUrgentTicket();
-      } else {
-        await ConsultationTicketService.consumeNormalTicket();
-      }
-      await ConsultationSendHistoryService.markFirstConsultationCompleted();
-      await _loadAccessState();
-      await BridgeThreadLocalStore.appendUserMessage(
-        chatId: _chatId!,
-        text: text,
-        consultationType: mailConsultationType,
-        messageId: res.messageId,
-      );
-      await DeveloperChatPref.setActiveChatId(
-        _chatId!,
-        consultationType: mailConsultationType,
-        pin: true,
-      );
+
+      await persistFollowUpLocally(messageId: res.messageId);
       _input.clear();
-      await DeveloperChatPref.clearConsultationDraft();
-      await _loadThread(silent: false, scrollToLatest: true);
-      _scrollToBottom(animated: true);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              ticketKind == ConsultationSendTicketKind.urgent
-                  ? '送信しました（至急券1枚）'
-                  : '送信しました（通常券1枚）',
-            ),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      if (mounted) setState(() => _loading = false);
+      await _completeConsultationSendAndShowMessageScreen(ticketKind: ticketKind);
     } catch (e) {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+          _optimisticUserBubble = null;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('エラー: $e')),
         );
@@ -1183,8 +1400,8 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
           ),
         if (_showConsultationChat &&
             !_loading &&
-            _messages.isNotEmpty &&
-            _threadOpensWithPriority(_messages))
+            _visibleMessages.isNotEmpty &&
+            _threadOpensWithPriority(_visibleMessages))
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
             child: Container(

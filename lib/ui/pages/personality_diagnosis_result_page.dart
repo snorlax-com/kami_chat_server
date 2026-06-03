@@ -362,7 +362,7 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
                       if (_showGuestLock) ...[
                         _buildChatMessage(
                           message:
-                              '詳細な性格診断を開示するには、ログインまたはメールアドレス認証が必要です。\n\n認証後、診断結果は保存され、次回も同じ内容を確認できます。',
+                              '詳細な性格診断を開示するには、Google でログインが必要です。\n\n認証後、診断結果は保存され、次回も同じ内容を確認できます。',
                         ),
                         const SizedBox(height: 12),
                         _buildLockedCard(hint: '性格タイプの深掘り解説'),

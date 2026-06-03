@@ -1,13 +1,14 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
+import 'package:kami_face_oracle/services/consultation_access_service.dart';
 import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 import 'package:kami_face_oracle/services/iap_service.dart';
+import 'package:kami_face_oracle/services/play_billing_error_mapper.dart';
 import 'package:kami_face_oracle/services/local_ticket_store_service.dart';
 import 'package:kami_face_oracle/services/store_catalog_service.dart';
 import 'package:kami_face_oracle/services/play_install_service.dart';
@@ -16,12 +17,20 @@ import 'package:kami_face_oracle/services/store_ui_helper.dart';
 import 'package:kami_face_oracle/services/store_access_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/services/subscription_management_service.dart';
+import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/ui/pages/store_locked_page.dart';
 
 class StorePage extends StatefulWidget {
-  const StorePage({super.key, this.embedInShell = false});
+  const StorePage({
+    super.key,
+    this.embedInShell = false,
+    this.forTicketPurchase = false,
+  });
 
   final bool embedInShell;
+
+  /// 占い相談の券不足から開いたとき（加入済みならロック画面を出さない）。
+  final bool forTicketPurchase;
 
   @override
   State<StorePage> createState() => _StorePageState();
@@ -37,16 +46,19 @@ class _StorePageState extends State<StorePage> {
   bool _canPurchaseTickets = false;
   bool _isSideloadInstall = false;
   String? _purchasingId;
+  String? _lastBillingError;
   VoidCallback? _refreshListener;
+  int _prevNormalTickets = 0;
+  int _prevUrgentTickets = 0;
 
   @override
   void initState() {
     super.initState();
-    _iap.onTicketsGranted = _onTicketsGranted;
     _iap.onPurchaseCanceled = _onPurchaseCanceled;
     _iap.onPurchaseFailed = _onPurchaseFailed;
     _iap.onSubscriptionUpdated = _onSubscriptionUpdated;
-    _refreshListener = () => unawaited(_load());
+    _iap.onPurchasePending = _onPurchasePending;
+    _refreshListener = () => unawaited(_onStoreTabRefreshRequested());
     AppNavigation.refreshStoreTab.addListener(_refreshListener!);
     _load();
   }
@@ -54,20 +66,27 @@ class _StorePageState extends State<StorePage> {
   @override
   void dispose() {
     AppNavigation.refreshStoreTab.removeListener(_refreshListener!);
-    if (_iap.onTicketsGranted == _onTicketsGranted) _iap.onTicketsGranted = null;
     if (_iap.onPurchaseCanceled == _onPurchaseCanceled) _iap.onPurchaseCanceled = null;
     if (_iap.onPurchaseFailed == _onPurchaseFailed) _iap.onPurchaseFailed = null;
     if (_iap.onSubscriptionUpdated == _onSubscriptionUpdated) _iap.onSubscriptionUpdated = null;
+    if (_iap.onPurchasePending == _onPurchasePending) _iap.onPurchasePending = null;
     super.dispose();
   }
 
-  void _onTicketsGranted(int tickets, String productId, {bool isUrgent = false}) {
-    if (!mounted) return;
-    _clearPurchasing(productId);
-    final label = ConsultationTicketPacksService.getPackById(productId)?.name ?? '相談券';
-    final kind = isUrgent ? '至急券' : '通常券';
-    StoreUiHelper.showSnack('$label を購入しました（+$tickets $kind）', backgroundColor: Colors.green);
-    unawaited(_load(refreshBalanceOnly: true));
+  /// 券購入完了後、占い相談タブへ即時復帰（残高更新を待たない）。
+  void _completeTicketPurchaseReturn() {
+    BillingLog.info(
+      'completeTicketPurchaseReturn embed=${widget.embedInShell} '
+      'pending=${AppNavigation.shouldReturnToConsultationAfterTicketStorePurchase}',
+    );
+    if (!widget.embedInShell && mounted) {
+      final nav = Navigator.of(context);
+      if (nav.canPop()) {
+        nav.pop();
+        unawaited(AppNavigation.restoreConsultationDraftNow());
+      }
+    }
+    unawaited(AppNavigation.completeTicketPackPurchaseFromStore());
   }
 
   void _onSubscriptionUpdated(bool active, {int bonusTickets = 0}) {
@@ -75,7 +94,7 @@ class _StorePageState extends State<StorePage> {
     _clearPurchasing(StoreCatalogService.subscription.productId);
     setState(() => _isSubscribed = active);
     if (bonusTickets > 0) {
-      StoreUiHelper.showSnack('サブスク加入しました。初回特典 +$bonusTickets 通常券', backgroundColor: Colors.green);
+      StoreUiHelper.showSnack('サブスク加入しました。初回特典 質問券 +$bonusTickets 枚', backgroundColor: Colors.green);
     } else if (active) {
       StoreUiHelper.showSnack('サブスクに加入しました', backgroundColor: Colors.green);
     }
@@ -88,17 +107,47 @@ class _StorePageState extends State<StorePage> {
     StoreUiHelper.showSnack('購入をキャンセルしました');
   }
 
+  void _onPurchasePending(String productId) {
+    if (!mounted) return;
+    setState(() => _purchasingId = productId);
+    StoreUiHelper.showSnack('購入処理を確認中です（決済保留）');
+  }
+
   void _onPurchaseFailed(String productId, String? message) {
     if (!mounted) return;
     _clearPurchasing(productId);
+    final text = message ?? PlayBillingErrorMapper.userMessage(null, productId: productId);
+    setState(() => _lastBillingError = text);
     if (StoreBillingConfig.allowAppStoreWhenPlayMissing) {
       unawaited(_fallbackAppStore(productId));
       return;
     }
-    StoreUiHelper.showSnack(
-      message ?? 'Google Play 課金に失敗しました。Play ストアからインストールしたビルドか確認してください。',
-      backgroundColor: Colors.orange.shade800,
-    );
+    StoreUiHelper.showSnack(text, backgroundColor: Colors.orange.shade800);
+  }
+
+  Future<void> _restorePurchases() async {
+    if (!_iap.isAvailable) {
+      _showPlayUnavailableMessage();
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _lastBillingError = null;
+    });
+    try {
+      await _iap.restorePurchases();
+      if (mounted) {
+        StoreUiHelper.showSnack('購入情報を復元しました', backgroundColor: Colors.green);
+      }
+    } catch (e) {
+      if (mounted) {
+        final msg = PlayBillingErrorMapper.userMessage(e);
+        setState(() => _lastBillingError = msg);
+        StoreUiHelper.showSnack(msg, backgroundColor: Colors.orange.shade800);
+      }
+    } finally {
+      if (mounted) await _load();
+    }
   }
 
   Future<void> _fallbackAppStore(String productId) async {
@@ -114,8 +163,22 @@ class _StorePageState extends State<StorePage> {
     if (_purchasingId == id) setState(() => _purchasingId = null);
   }
 
+  Future<void> _onStoreTabRefreshRequested() async {
+    await _load(refreshBalanceOnly: true);
+    if (!mounted || _purchasingId == null) return;
+    if (!_iap.isProductPending(_purchasingId!)) {
+      setState(() => _purchasingId = null);
+    }
+  }
+
   bool get _canUseSideloadTest =>
       StoreBillingConfig.allowSideloadTestPurchases && _isSideloadInstall;
+
+  /// 占い相談の券不足から開いたストア（IndexedStack では forTicketPurchase が false のためフラグ併用）。
+  bool get _fromConsultationTicketFlow =>
+      widget.forTicketPurchase ||
+      AppNavigation.shouldReturnToConsultationAfterTicketStorePurchase;
+
 
   Future<void> _load({bool refreshBalanceOnly = false}) async {
     if (!refreshBalanceOnly) {
@@ -127,12 +190,18 @@ class _StorePageState extends State<StorePage> {
     }
     final normal = await ConsultationTicketService.normalTickets();
     final urgent = await ConsultationTicketService.priorityTickets();
-    final allowed = await StoreAccessService.canOpenStore();
-    final canBuyTickets = await StoreAccessService.canPurchaseConsultationTickets();
-    var sub = allowed;
-    if (!allowed) {
+    final access = await ConsultationAccessService.loadState();
+    final allowed = _fromConsultationTicketFlow
+        ? access.isSubscribed
+        : await StoreAccessService.canOpenStore();
+    var canBuyTickets = await StoreAccessService.canPurchaseConsultationTickets();
+    if (_fromConsultationTicketFlow && access.isSubscribed && _canUseSideloadTest) {
+      canBuyTickets = true;
+    }
+    var sub = access.isSubscribed;
+    if (!_fromConsultationTicketFlow && !allowed) {
       sub = false;
-    } else {
+    } else if (!_fromConsultationTicketFlow) {
       sub = await ConsultationSubscriptionService.isActive();
       if (StoreBillingConfig.requirePlayVerifiedAccess) {
         final sideloadOk = await SideloadBillingService.isSideloadTestSubscriptionValid();
@@ -140,6 +209,7 @@ class _StorePageState extends State<StorePage> {
       }
     }
     if (!mounted) return;
+    final balanceIncreased = normal > _prevNormalTickets || urgent > _prevUrgentTickets;
     setState(() {
       _normalTickets = normal;
       _urgentTickets = urgent;
@@ -148,6 +218,18 @@ class _StorePageState extends State<StorePage> {
       _canPurchaseTickets = canBuyTickets;
       _isLoading = false;
     });
+    _prevNormalTickets = normal;
+    _prevUrgentTickets = urgent;
+    if (balanceIncreased && (normal > 0 || urgent > 0)) {
+      unawaited(_maybeReturnAfterTicketBalanceIncreased());
+    }
+  }
+
+  Future<void> _maybeReturnAfterTicketBalanceIncreased() async {
+    final shouldReturn = await AppNavigation.shouldReturnToConsultationAfterTicketStorePurchaseAsync();
+    if (!shouldReturn) return;
+    BillingLog.info('storePage: balance increased -> return to consultation');
+    _completeTicketPurchaseReturn();
   }
 
   void _showPlayUnavailableMessage() {
@@ -183,6 +265,9 @@ class _StorePageState extends State<StorePage> {
       final n = await LocalTicketStoreService.purchasePack(pack);
       if (mounted) {
         StoreUiHelper.showSnack('${pack.name} テスト購入（+$n枚）', backgroundColor: Colors.green);
+      }
+      if (n > 0) {
+        _completeTicketPurchaseReturn();
       }
     } finally {
       if (mounted) {
@@ -229,7 +314,16 @@ class _StorePageState extends State<StorePage> {
   }
 
   Future<void> _purchasePack(ConsultationTicketPack pack) async {
-    if (!await StoreAccessService.guardTicketPurchase(context)) return;
+    if (!_fromConsultationTicketFlow) {
+      if (!await StoreAccessService.guardTicketPurchase(context)) return;
+    } else if (!_canPurchaseTickets && !_canUseSideloadTest) {
+      if (!mounted) return;
+      StoreUiHelper.showSnack(
+        '初回相談はサブスク特典の通常券をご利用ください。2回目以降、ここで券を購入できます。',
+        backgroundColor: Colors.orange.shade800,
+      );
+      return;
+    }
     if (!mounted) return;
 
     if (_canUseSideloadTest) {
@@ -238,7 +332,7 @@ class _StorePageState extends State<StorePage> {
     }
 
     if (_iap.canPurchaseViaPlay(pack)) {
-      final product = _iap.productById(pack.id)!;
+      final product = _iap.productForPack(pack)!;
       final ok = await StoreUiHelper.confirm(
         title: pack.name,
         body: '${pack.description}\n価格: ${product.price}\n\nGoogle Play の購入画面が開きます。',
@@ -298,6 +392,9 @@ class _StorePageState extends State<StorePage> {
       if (mounted) {
         StoreUiHelper.showSnack('${pack.name}（+$n枚）', backgroundColor: Colors.green);
       }
+      if (n > 0) {
+        _completeTicketPurchaseReturn();
+      }
     } finally {
       if (mounted) {
         setState(() => _purchasingId = null);
@@ -341,9 +438,8 @@ class _StorePageState extends State<StorePage> {
     );
   }
 
-  Widget _buildSubscriptionCard() {
+  Widget _buildSubscriptionInfoCard() {
     final plan = StoreCatalogService.subscription;
-    final isBuying = _purchasingId == plan.productId;
     final product = _iap.subscriptionProduct;
     final price = product?.price ?? '¥${plan.priceYen}';
 
@@ -357,35 +453,24 @@ class _StorePageState extends State<StorePage> {
             Row(
               children: [
                 Expanded(
-                  child: Text(plan.name, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  child: Text(
+                    plan.name,
+                    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                 ),
                 if (_isSubscribed)
-                  const Chip(label: Text('加入中', style: TextStyle(fontSize: 11)), visualDensity: VisualDensity.compact),
+                  const Chip(
+                    label: Text('加入中', style: TextStyle(fontSize: 11)),
+                    visualDensity: VisualDensity.compact,
+                  ),
               ],
             ),
             const SizedBox(height: 8),
             Text(plan.description, style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 8),
-            Text('$price / ${plan.billingPeriodLabel}', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.purple.shade200)),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: isBuying
-                  ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                  : _isSubscribed
-                      ? (_iap.canSubscribeViaPlay
-                          ? FilledButton(
-                              onPressed: () => unawaited(_openPlaySubscriptionManagement()),
-                              child: const Text('Google Play で管理'),
-                            )
-                          : OutlinedButton(
-                              onPressed: null,
-                              child: Text(_canUseSideloadTest ? 'テスト加入済み' : '加入済み'),
-                            ))
-                      : FilledButton(
-                          onPressed: () => unawaited(_purchaseSubscription()),
-                          child: Text(_canUseSideloadTest ? 'テスト加入' : 'サブスクに加入'),
-                        ),
+            Text(
+              '$price / ${plan.billingPeriodLabel}',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.purple.shade200),
             ),
           ],
         ),
@@ -393,11 +478,45 @@ class _StorePageState extends State<StorePage> {
     );
   }
 
+  /// 画面最下部に固定するサブスク加入・管理ボタン。
+  Widget _buildSubscriptionBottomAction() {
+    final plan = StoreCatalogService.subscription;
+    final isBuying = _purchasingId == plan.productId;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+        child: SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: isBuying
+              ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+              : _isSubscribed
+                  ? (_iap.canSubscribeViaPlay
+                      ? FilledButton(
+                          onPressed: () => unawaited(_openPlaySubscriptionManagement()),
+                          child: const Text('Google Play で管理'),
+                        )
+                      : OutlinedButton(
+                          onPressed: null,
+                          child: Text(_canUseSideloadTest ? 'テスト加入済み' : '加入済み'),
+                        ))
+                  : FilledButton(
+                      onPressed: () => unawaited(_purchaseSubscription()),
+                      child: Text(_canUseSideloadTest ? 'テスト加入' : 'サブスクに加入'),
+                    ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPackCard(ConsultationTicketPack pack) {
-    final isBuying = _purchasingId == pack.id;
-    final product = _iap.productById(pack.id);
+    final isBuying = _purchasingId == pack.id || _iap.isProductPending(pack.id);
+    final product = _iap.productForPack(pack);
     final price = product?.price ?? (pack.referencePriceYen != null ? '¥${pack.referencePriceYen}' : '');
-    final purchaseEnabled = _canPurchaseTickets;
+    final purchaseEnabled =
+        _canPurchaseTickets || (_fromConsultationTicketFlow && _canUseSideloadTest);
 
     return Card(
       color: const Color(0xFF141A2E),
@@ -425,8 +544,13 @@ class _StorePageState extends State<StorePage> {
             isBuying
                 ? const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2))
                 : FilledButton(
+                    key: Key('store_buy_${pack.id}'),
                     onPressed: purchaseEnabled ? () => unawaited(_purchasePack(pack)) : null,
-                    child: Text(_canUseSideloadTest ? 'テスト購入' : '購入'),
+                    child: Text(
+                      _iap.isProductPending(pack.id)
+                          ? '確認中'
+                          : (_canUseSideloadTest ? 'テスト購入' : '購入'),
+                    ),
                   ),
           ],
         ),
@@ -457,11 +581,24 @@ class _StorePageState extends State<StorePage> {
                       style: TextStyle(color: _isSubscribed ? Colors.lightGreenAccent : Colors.orange.shade200),
                     ),
                     const SizedBox(height: 4),
-                    Text('通常券: $_normalTickets 枚 / 至急券: $_urgentTickets 枚', style: const TextStyle(color: Colors.white)),
+                    Text(
+                      '質問券（通常）: $_normalTickets 枚 / 至急券: $_urgentTickets 枚',
+                      style: const TextStyle(color: Colors.white),
+                    ),
                   ],
                 ),
               ),
               _buildBillingBanner(),
+              if (_lastBillingError != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  color: Colors.red.withValues(alpha: 0.2),
+                  child: Text(
+                    _lastBillingError!,
+                    style: TextStyle(color: Colors.red.shade200, fontSize: 12),
+                  ),
+                ),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: _load,
@@ -469,35 +606,84 @@ class _StorePageState extends State<StorePage> {
                     padding: const EdgeInsets.all(16),
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      _buildSubscriptionCard(),
-                      if (!_canPurchaseTickets) ...[
-                        const SizedBox(height: 8),
+                      _buildSubscriptionInfoCard(),
+                      if (!_isSubscribed) ...[
+                        const SizedBox(height: 12),
                         Card(
                           color: const Color(0xFF2A2030),
                           child: Padding(
                             padding: const EdgeInsets.all(14),
                             child: Text(
-                              '初回相談はサブスク特典の通常券をご利用ください。\n'
-                              '2回目以降、ここで通常券・至急券を購入できます。',
+                              'サブスク加入後に、通常券（¥600）・至急券（¥10,000）を購入できます。',
                               style: TextStyle(color: Colors.amber.shade100, fontSize: 13, height: 1.35),
                             ),
                           ),
                         ),
                       ],
-                      const SizedBox(height: 8),
-                      ...packs.map(_buildPackCard),
-                      if (kDebugMode && _iap.lastLoadError != null)
-                        Text('Play debug: ${_iap.lastLoadError}', style: const TextStyle(color: Colors.white24, fontSize: 10)),
-                      if (kDebugMode && _iap.notFoundProductIds.isNotEmpty)
-                        Text('not found: ${_iap.notFoundProductIds}', style: const TextStyle(color: Colors.white24, fontSize: 10)),
+                      if (_isSubscribed) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          '追加購入',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontWeight: FontWeight.bold),
+                        ),
+                        if (!_canPurchaseTickets) ...[
+                          const SizedBox(height: 8),
+                          Card(
+                            color: const Color(0xFF2A2030),
+                            child: Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: Text(
+                                '初回相談はサブスク特典の質問券をご利用ください。\n'
+                                '2回目以降、ここで通常券・至急券を購入できます。',
+                                style: TextStyle(color: Colors.amber.shade100, fontSize: 13, height: 1.35),
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        ...packs.map(_buildPackCard),
+                      ],
+                      if (_iap.lastLoadError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            _iap.lastLoadError!,
+                            style: TextStyle(color: Colors.orange.shade200, fontSize: 11),
+                          ),
+                        ),
+                      if (_iap.notFoundProductIds.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            '未取得 ID: ${_iap.notFoundProductIds.join(", ")}',
+                            style: const TextStyle(color: Colors.white38, fontSize: 10),
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(12),
-                child: OutlinedButton(onPressed: _isLoading ? null : () => unawaited(_load()), child: const Text('再読み込み')),
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _isLoading ? null : () => unawaited(_restorePurchases()),
+                        child: const Text('購入を復元'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _isLoading ? null : () => unawaited(_load()),
+                        child: const Text('再読み込み'),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              if (!_isLoading) _buildSubscriptionBottomAction(),
             ],
           );
 

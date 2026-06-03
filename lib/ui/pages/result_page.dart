@@ -44,11 +44,6 @@ class _ResultPageState extends State<ResultPage> {
       'name': widget.god.nameJa,
       'ts': DateTime.now().toIso8601String(),
     });
-    // 1日1回限定のポイント付与（初回占い時のみ）
-    final dailyPoint = await Storage.addDailyPoint(1);
-    if (dailyPoint > 0) {
-      // 今日初めての占いでポイントが付与された
-    }
     // Firestoreへ日次記録（匿名Auth前提。未設定時は内部で無視）
     try {
       final beauty = widget.beautyScore ?? (widget.skin?.brightness ?? 0.5);

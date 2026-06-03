@@ -1,7 +1,6 @@
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
-import 'package:kami_face_oracle/services/play_install_service.dart';
 import 'package:kami_face_oracle/services/sideload_billing_service.dart';
 import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_service.dart';

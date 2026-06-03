@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'package:kami_face_oracle/config/play_billing_products.dart';
+
 /// 消耗型相談券の種別。
 enum ConsultationTicketProductType { normal, urgent }
 
@@ -35,7 +37,7 @@ class ConsultationTicketPacksService {
 
   static const List<ConsultationTicketPack> _fallbackPacks = [
     ConsultationTicketPack(
-      id: 'normal_ticket_600',
+      id: PlayBillingProducts.ticketNormal600,
       name: '通常質問券 1枚',
       tickets: 1,
       description: '通常の占い相談を1回分',
@@ -43,7 +45,7 @@ class ConsultationTicketPacksService {
       referencePriceYen: 600,
     ),
     ConsultationTicketPack(
-      id: 'urgent_ticket_10000',
+      id: PlayBillingProducts.ticketUrgent10000,
       name: '至急質問券 1枚',
       tickets: 1,
       description: '至急の占い相談を1回分',
@@ -104,11 +106,14 @@ class ConsultationTicketPacksService {
   }
 
   static ConsultationTicketPack? getPackById(String id) {
+    final canonical = PlayBillingProducts.resolveCanonicalProductId(id);
     for (final p in packs) {
-      if (p.id == id) return p;
+      if (p.id == id || p.id == canonical) return p;
+      if (PlayBillingProducts.resolveCanonicalProductId(p.id) == canonical) return p;
     }
     return null;
   }
 
-  static bool isConsumableProduct(String id) => getPackById(id) != null;
+  static bool isConsumableProduct(String id) =>
+      PlayBillingProducts.isConsumableProduct(id) || getPackById(id) != null;
 }

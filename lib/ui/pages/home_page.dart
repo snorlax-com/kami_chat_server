@@ -1,14 +1,9 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
 import 'dart:math' as math;
 import 'package:kami_face_oracle/core/storage.dart';
 import 'package:kami_face_oracle/ui/pages/tutorial_intro_page.dart';
 import 'package:kami_face_oracle/core/deities.dart';
 import 'package:kami_face_oracle/core/deity.dart';
-import 'package:kami_face_oracle/ui/pages/meditation_page.dart';
-import 'package:kami_face_oracle/ui/pages/store_page.dart';
-import 'package:kami_face_oracle/services/store_access_service.dart';
-import 'package:kami_face_oracle/services/currency_service.dart';
 import 'package:kami_face_oracle/ui/pages/legal_document_page.dart';
 import 'package:kami_face_oracle/ui/pages/privacy_settings_page.dart';
 import 'package:kami_face_oracle/core/e2e.dart';
@@ -136,10 +131,6 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  int _point = 0; // 既存ポイント
-  int _coins = 0;
-  int _gems = 0;
-  int _fragments = 0;
   Deity? _tutorialDeity; // チュートリアルで選ばれた神
   PersonalityTypeDetail? _tutorialPillarDetail; // 柱に紐づく性格説明（JSON）
   late AnimationController _glowController;
@@ -149,7 +140,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _load();
     _glowController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 3),
@@ -181,23 +171,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void didChangeDependencies() {
     super.didChangeDependencies();
     _loadTutorialDeity();
-  }
-
-  Future<void> _load() async {
-    final p = await Storage.getPoint();
-    final w = await CurrencyService.load();
-    setState(() {
-      _point = p;
-      _coins = w['coins']!;
-      _gems = w['gems']!;
-      _fragments = w['fragments']!;
-    });
-  }
-
-  Future<void> _openStore() async {
-    if (!await StoreAccessService.guardStoreRoute(context)) return;
-    if (!mounted) return;
-    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const StorePage()));
   }
 
   Future<void> _loadTutorialDeity() async {
@@ -396,53 +369,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const SizedBox(height: 8),
-                  _BalanceBar(
-                    point: _point,
-                    coins: _coins,
-                    gems: _gems,
-                    fragments: _fragments,
-                    onAddTest: () async {
-                      final v = await Storage.addPoint(10);
-                      await CurrencyService.addCoins(10);
-                      await _load();
-                      setState(() => _point = v);
-                    },
-                  ),
                   if (_tutorialDeity != null) ...[
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 12),
                     _TutorialPillarHomeCard(
                       deity: _tutorialDeity!,
                       detail: _tutorialPillarDetail,
                     ),
                   ],
-                  const SizedBox(height: 24),
-                  // 機能カード（2列グリッド）
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _FeatureCard(
-                          icon: Icons.self_improvement,
-                          title: '瞑想',
-                          subtitle: '心を整える',
-                          color: const Color(0xFF14B8A6),
-                          onPressed: () =>
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => const MeditationPage())),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _FeatureCard(
-                          icon: Icons.store,
-                          title: 'ストア',
-                          subtitle: 'アイテム',
-                          color: const Color(0xFFFFB84D),
-                          onPressed: () => unawaited(_openStore()),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  // チュートリアルボタン（E2E: data-testid 代わりに Key）
+                  const SizedBox(height: 16),
+                  // チュートリアル（E2E: data-testid 代わりに Key）
                   Semantics(
                     button: true,
                     label: 'チュートリアルを開く',
@@ -724,255 +659,3 @@ class _TutorialPillarHomeCard extends StatelessWidget {
   }
 }
 
-class _BalanceBar extends StatelessWidget {
-  final int point;
-  final int coins;
-  final int gems;
-  final int fragments;
-  final VoidCallback onAddTest;
-  const _BalanceBar(
-      {required this.point, required this.coins, required this.gems, required this.fragments, required this.onAddTest});
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: 'ポイント $point、コイン $coins、ジェム $gems、フラグメント $fragments',
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Colors.black.withOpacity(0.4),
-              Colors.black.withOpacity(0.3),
-            ],
-          ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.15),
-            width: 1.5,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.5),
-              blurRadius: 20,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.account_balance_wallet, color: Colors.amberAccent, size: 24),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'ポイント',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.7),
-                      fontSize: 11,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$point',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            _CurrencyItem(
-              icon: Icons.monetization_on,
-              value: coins,
-              color: Colors.amberAccent,
-            ),
-            const SizedBox(width: 8),
-            _CurrencyItem(
-              icon: Icons.diamond,
-              value: gems,
-              color: Colors.cyanAccent,
-            ),
-            const SizedBox(width: 8),
-            _CurrencyItem(
-              icon: Icons.auto_awesome,
-              value: fragments,
-              color: Colors.purpleAccent,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CurrencyItem extends StatelessWidget {
-  final IconData icon;
-  final int value;
-  final Color color;
-
-  const _CurrencyItem({
-    required this.icon,
-    required this.value,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3), width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 4),
-          Text(
-            '$value',
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FeatureCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Color color;
-  final VoidCallback onPressed;
-  final bool showUnreadDot;
-
-  const _FeatureCard({
-    super.key,
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.color,
-    required this.onPressed,
-    this.showUnreadDot = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: '$title。$subtitle。',
-      hint: 'ダブルタップで開く',
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  color.withOpacity(0.2),
-                  color.withOpacity(0.1),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: color.withOpacity(0.4),
-                width: 1.5,
-              ),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onPressed,
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: color.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(icon, color: color, size: 24),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        title,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.8,
-                          shadows: [
-                            Shadow(
-                              color: color.withOpacity(0.6),
-                              blurRadius: 8,
-                              offset: const Offset(0, 0),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        subtitle,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          if (showUnreadDot)
-            Positioned(
-              top: 8,
-              right: 8,
-              child: IgnorePointer(
-                child: Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: Colors.redAccent,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.red.withOpacity(0.45),
-                        blurRadius: 6,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}

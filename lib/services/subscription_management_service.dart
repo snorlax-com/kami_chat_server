@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
 import 'package:kami_face_oracle/services/consultation_access_service.dart';
 import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
@@ -82,11 +83,13 @@ class SubscriptionManagementService {
     await ConsultationSubscriptionService.setActive(false);
     await SideloadBillingService.clearSideloadTestPurchase();
     await IAPService.instance.syncSubscriptionStatusFromPlay();
+    AppNavigation.notifyStoreAccessChanged();
   }
 
   /// debug 用ローカルサブスクを解除。
   static Future<void> cancelLocalDebugSubscription() async {
     await ConsultationSubscriptionService.setActive(false);
     await IAPService.instance.syncSubscriptionStatusFromPlay();
+    AppNavigation.notifyStoreAccessChanged();
   }
 }

@@ -10,8 +10,12 @@ class NotificationPermissionPrompt {
 
   static const _prefsKeyLastPromptMs = 'notification_prompt_last_ms_v1';
 
+  /// integration_test では表示しない。
+  static bool suppressForIntegrationTest = false;
+
   /// 通知がオフのとき、案内ダイアログを表示（24時間に1回まで）。
   static Future<void> maybeShow(BuildContext context) async {
+    if (suppressForIntegrationTest) return;
     if (!Platform.isAndroid && !Platform.isIOS) return;
 
     await PushNotificationService.instance.ensureLocalReady();

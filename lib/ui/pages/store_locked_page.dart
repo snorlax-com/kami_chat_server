@@ -17,13 +17,14 @@ class StoreLockedPage extends StatelessWidget {
             Icon(Icons.lock_outline, size: 48, color: Colors.white54),
             SizedBox(height: 16),
             Text(
-              'ストアは定期購入サブスク加入後にご利用いただけます',
+              'ストアはサブスクご加入中のみご利用いただけます',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70, fontSize: 16),
             ),
             SizedBox(height: 8),
             Text(
-              '占い相談タブから月額サブスクに加入してください。',
+              'サブスクを解約した場合、ストアはご利用いただけません。\n'
+              '再度ご利用になるには、占い相談からサブスクへご加入ください。',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white54, fontSize: 13),
             ),

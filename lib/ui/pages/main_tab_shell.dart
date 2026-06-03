@@ -17,8 +17,16 @@ import 'package:kami_face_oracle/services/developer_reply_notification_watchdog.
 import 'package:kami_face_oracle/services/developer_reply_notify_service.dart';
 import 'package:kami_face_oracle/services/consultation_tab_visibility.dart';
 import 'package:kami_face_oracle/services/notification_permission_prompt.dart';
+import 'package:kami_face_oracle/services/consultation_access_service.dart';
+import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
+import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart';
+import 'package:kami_face_oracle/services/consultation_ticket_store_return_prefs.dart';
+import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
+import 'package:kami_face_oracle/services/store_ui_helper.dart';
 import 'package:kami_face_oracle/services/store_access_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
+import 'package:kami_face_oracle/services/billing_log.dart';
+import 'package:kami_face_oracle/services/iap_service.dart';
 import 'package:kami_face_oracle/bootstrap/deferred_startup.dart';
 
 const Color _kNavSelected = Color(0xFF8B5CF6);
@@ -39,9 +47,13 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
   late int _index;
   bool _consultationUnread = false;
   bool _storeAccessAllowed = false;
+  bool _openedStoreForTicketPurchase = false;
   Timer? _unreadPollTimer;
   Timer? _devReplyNotifyTimer;
   VoidCallback? _storeAccessListener;
+  VoidCallback? _storeForTicketsListener;
+  VoidCallback? _consultationReturnListener;
+  void Function(int tickets, String productId, {bool isUrgent})? _shellTicketsGrantedHandler;
 
   static const _titles = [
     'ホーム',
@@ -59,11 +71,21 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     ConsultationTabVisibility.tabSelected = _index == 1;
     AppNavigation.registerShellOpener(_openConsultationTab);
     AppNavigation.registerMainTabSwitcher(_onBarTap);
+    AppNavigation.registerStoreTabOpener(_goToStoreTab);
+    AppNavigation.registerStoreForTicketsImmediate(_switchToStoreForTicketPurchaseImmediate);
+    AppNavigation.registerConsultationTabImmediate(_switchToConsultationTabImmediate);
+    AppNavigation.registerMainTabIndexDirect(_setMainTabIndexDirect);
+    _shellTicketsGrantedHandler = _onShellTicketsGranted;
+    IAPService.instance.onTicketsGranted = _shellTicketsGrantedHandler;
     ConsultationTabVisibility.appResumed = true;
     _refreshConsultationUnread();
     unawaited(_refreshStoreAccess());
     _storeAccessListener = () => unawaited(_refreshStoreAccess());
     AppNavigation.refreshStoreAccess.addListener(_storeAccessListener!);
+    _storeForTicketsListener = _switchToStoreForTicketPurchaseImmediate;
+    AppNavigation.requestOpenStoreForTickets.addListener(_storeForTicketsListener!);
+    _consultationReturnListener = _onConsultationReturnRequested;
+    AppNavigation.requestReturnToConsultationAfterPurchase.addListener(_consultationReturnListener!);
     _unreadPollTimer = Timer.periodic(const Duration(seconds: 45), (_) => _refreshConsultationUnread());
     _devReplyNotifyTimer = Timer.periodic(
       const Duration(seconds: 15),
@@ -78,7 +100,10 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await DeferredStartup.awaitReady(timeout: const Duration(seconds: 10));
       if (!mounted) return;
-      await NotificationPermissionPrompt.maybeShow(context);
+      // 占い相談タブでは送信操作を遮らない（通知案内はホーム表示時のみ）
+      if (_index == 0) {
+        await NotificationPermissionPrompt.maybeShow(context);
+      }
     });
     if (_index == 3) {
       unawaited(_playMeditationForTab());
@@ -86,14 +111,69 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     if (_index == AppNavigation.tabStore) {
       WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_refreshStoreAccess()));
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_resumeConsultationTabIfTicketPurchased());
+    });
+  }
+
+  /// 購入完了後にアプリがバックグラウンドから戻った場合の復帰。
+  Future<void> _resumeConsultationTabIfTicketPurchased() async {
+    if (!await ConsultationTicketStoreReturnPrefs.isPending()) return;
+    final normal = await ConsultationTicketService.normalTickets();
+    final urgent = await ConsultationTicketService.priorityTickets();
+    if (normal <= 0 && urgent <= 0) return;
+    if (!mounted) return;
+    BillingLog.info('resumeConsultationTabIfTicketPurchased normal=$normal urgent=$urgent');
+    AppNavigation.returnToConsultationAfterStorePurchase();
+  }
+
+  void _setMainTabIndexDirect(int index) {
+    if (!mounted) return;
+    final next = index.clamp(0, _titles.length - 1);
+    if (_index == next) {
+      if (next == AppNavigation.tabConsultation) {
+        unawaited(AppNavigation.restoreConsultationDraftNow());
+        AppNavigation.scrollConsultationToLatest.value++;
+      }
+      return;
+    }
+    setState(() => _index = next);
+    ConsultationTabVisibility.tabSelected = next == AppNavigation.tabConsultation;
+    BillingLog.info('setMainTabIndexDirect index=$next');
+    if (next == AppNavigation.tabConsultation) {
+      unawaited(AppNavigation.restoreConsultationDraftNow());
+      AppNavigation.scrollConsultationToLatest.value++;
+    }
+  }
+
+  void _onConsultationReturnRequested() {
+    if (!mounted) return;
+    if (_index == AppNavigation.tabConsultation) {
+      unawaited(AppNavigation.restoreConsultationDraftNow());
+      AppNavigation.scrollConsultationToLatest.value++;
+      return;
+    }
+    _switchToConsultationTabImmediate();
   }
 
   @override
   void dispose() {
     AppNavigation.unregisterShellOpener();
     AppNavigation.unregisterMainTabSwitcher();
+    AppNavigation.unregisterStoreTabOpener();
+    AppNavigation.unregisterConsultationTabImmediate();
+    final iap = IAPService.instance;
+    if (iap.onTicketsGranted == _shellTicketsGrantedHandler) {
+      iap.onTicketsGranted = null;
+    }
     if (_storeAccessListener != null) {
       AppNavigation.refreshStoreAccess.removeListener(_storeAccessListener!);
+    }
+    if (_storeForTicketsListener != null) {
+      AppNavigation.requestOpenStoreForTickets.removeListener(_storeForTicketsListener!);
+    }
+    if (_consultationReturnListener != null) {
+      AppNavigation.requestReturnToConsultationAfterPurchase.removeListener(_consultationReturnListener!);
     }
     WidgetsBinding.instance.removeObserver(this);
     _unreadPollTimer?.cancel();
@@ -116,18 +196,101 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       _refreshConsultationUnread();
       unawaited(_refreshStoreAccess());
       unawaited(DeveloperReplyNotifyService.pollAndNotify());
+      unawaited(_resumeConsultationTabIfTicketPurchased());
     }
   }
 
-  Future<void> _refreshStoreAccess() async {
-    final allowed = await StoreAccessService.canOpenStore();
+  Future<bool> _refreshStoreAccess() async {
+    final access = await ConsultationAccessService.loadState();
+    final allowed = access.isSubscribed;
+    final keepStoreDuringTicketFlow =
+        AppNavigation.pendingReturnToConsultationAfterTicketStore ||
+        AppNavigation.storeOpenedForTicketPurchase.value ||
+        await ConsultationTicketStoreReturnPrefs.isPending();
+    if (!mounted) return false;
+    setState(() => _storeAccessAllowed = allowed || keepStoreDuringTicketFlow);
+    return allowed || keepStoreDuringTicketFlow;
+  }
+
+  /// Play 課金完了時（StorePage の mount に依存しない）。
+  void _onShellTicketsGranted(int tickets, String productId, {bool isUrgent = false}) {
+    BillingLog.info(
+      'shellTicketsGranted tickets=$tickets product=$productId '
+      'pending=${AppNavigation.pendingReturnToConsultationAfterTicketStore} '
+      'storeFlag=${AppNavigation.storeOpenedForTicketPurchase.value} index=$_index',
+    );
+    AppNavigation.refreshStoreTab.value++;
+    if (tickets <= 0) return;
+    if (mounted && _index == AppNavigation.tabStore) {
+      final label = ConsultationTicketPacksService.getPackById(productId)?.name ?? '相談券';
+      final kind = isUrgent ? '至急券' : '通常券';
+      StoreUiHelper.showSnack('$label を購入しました（+$tickets $kind）', backgroundColor: Colors.green);
+    }
+    unawaited(AppNavigation.completeTicketPackPurchaseFromStore());
+  }
+
+  /// 占い相談などからストアタブへ。
+  Future<void> _goToStoreTab({bool forTicketPurchase = false}) async {
+    if (forTicketPurchase) {
+      await _goToStoreTabForTicketPurchase();
+      return;
+    }
+    final allowed = await _refreshStoreAccess();
     if (!mounted) return;
-    if (!allowed && _index == AppNavigation.tabStore) {
-      setState(() => _index = 0);
+    if (!allowed) {
+      await _promptSubscribeBeforeStore();
+      return;
     }
-    if (_storeAccessAllowed != allowed) {
-      setState(() => _storeAccessAllowed = allowed);
+    _switchToStoreTabIndex();
+  }
+
+  /// 券不足時：UI を即時切り替え（Play 同期なし）。
+  void _switchToStoreForTicketPurchaseImmediate() {
+    if (!mounted) return;
+    if (_index == AppNavigation.tabConsultation) {
+      AppNavigation.saveConsultationDraftNow();
     }
+    setState(() {
+      _openedStoreForTicketPurchase = true;
+      _storeAccessAllowed = true;
+      _index = AppNavigation.tabStore;
+    });
+    ConsultationTabVisibility.tabSelected = false;
+    AppNavigation.refreshStoreTab.value++;
+    BillingLog.info('switchToStoreForTicketPurchaseImmediate index=${AppNavigation.tabStore}');
+  }
+
+  /// ストア購入後：占い相談タブへ即時切り替え。
+  void _switchToConsultationTabImmediate() {
+    if (!mounted) return;
+    _openedStoreForTicketPurchase = false;
+    BillingLog.info('switchToConsultationTabImmediate from=$_index');
+    _setMainTabIndexDirect(AppNavigation.tabConsultation);
+  }
+
+  /// 券購入誘導（非同期・加入未加入時はダイアログ）。
+  Future<void> _goToStoreTabForTicketPurchase() async {
+    _switchToStoreForTicketPurchaseImmediate();
+    final subscribed = await ConsultationSubscriptionService.isActive();
+    if (!mounted) return;
+    if (!subscribed) {
+      await _promptSubscribeBeforeStore();
+      return;
+    }
+  }
+
+  void _switchToStoreTabIndex() {
+    if (_index == AppNavigation.tabConsultation) {
+      AppNavigation.saveConsultationDraftNow();
+    }
+    if (!mounted) return;
+    setState(() {
+      _index = AppNavigation.tabStore;
+      _storeAccessAllowed = true;
+    });
+    ConsultationTabVisibility.tabSelected = false;
+    AppNavigation.refreshStoreTab.value++;
+    BillingLog.info('switchToStoreTabIndex index=$_index storeAllowed=$_storeAccessAllowed');
   }
 
   Future<void> _refreshConsultationUnread() async {
@@ -144,27 +307,31 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
   /// 瞑想トラックは下部ナビの「瞑想」アイコンのみで再生（他タブで通常BGMに戻す）
   Future<void> _onBarTap(int i) async {
     if (i == AppNavigation.tabStore) {
-      await _refreshStoreAccess();
-      if (!_storeAccessAllowed) {
-        if (!mounted) return;
-        await _promptSubscribeBeforeStore();
-        return;
-      }
+      await _goToStoreTab();
+      return;
     }
 
     final wasMeditation = _index == 3;
+    final previousIndex = _index;
+    final tabChanged = _index != i;
     if (_index == 1 && i != 1) {
       AppNavigation.saveConsultationDraftNow();
     }
     setState(() => _index = i);
     ConsultationTabVisibility.tabSelected = i == 1;
-    if (i == 1) {
-      unawaited(AppNavigation.restoreConsultationDraftNow());
-      AppNavigation.scrollConsultationToLatest.value++;
+    if (i == AppNavigation.tabConsultation) {
+      if (previousIndex == AppNavigation.tabStore &&
+          !AppNavigation.suppressCancelPendingWhenOpeningConsultation) {
+        _openedStoreForTicketPurchase = false;
+        AppNavigation.cancelPendingReturnToConsultationAfterTicketStore();
+      } else {
+        AppNavigation.clearStoreOpenedForTicketPurchase();
+      }
+      if (tabChanged) {
+        unawaited(AppNavigation.restoreConsultationDraftNow());
+        AppNavigation.scrollConsultationToLatest.value++;
+      }
       unawaited(_refreshConsultationUnread());
-    }
-    if (i == AppNavigation.tabStore) {
-      AppNavigation.refreshStoreTab.value++;
     }
     if (i == 3) {
       unawaited(_playMeditationForTab());
@@ -179,8 +346,8 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       builder: (ctx) => AlertDialog(
         title: const Text('サブスク加入が必要です'),
         content: const Text(
-          'ストアは定期購入サブスク加入後にご利用いただけます。\n'
-          '占い相談タブから月額サブスクに加入してください。',
+          'ストアはサブスクご加入中のみご利用いただけます。\n'
+          '解約済みの方は、占い相談タブから再度サブスクへご加入ください。',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('閉じる')),
@@ -195,10 +362,7 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     await StoreSubscriptionFlow.purchase(context);
     if (!mounted) return;
     if (await StoreAccessService.canOpenStore()) {
-      await _refreshStoreAccess();
-      if (!mounted) return;
-      setState(() => _index = AppNavigation.tabStore);
-      AppNavigation.refreshStoreTab.value++;
+      await _goToStoreTab();
     }
   }
 
@@ -213,7 +377,10 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     return Scaffold(
       resizeToAvoidBottomInset: true,
       appBar: AppBar(
-        title: Text(_titles[_index]),
+        title: Text(
+          _titles[_index],
+          key: ValueKey<String>('main_tab_title_${_titles[_index]}'),
+        ),
         flexibleSpace: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -262,7 +429,10 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
           const HomePage(embedInShell: true),
           const KamiChatPage(),
           _storeAccessAllowed
-              ? const StorePage(embedInShell: true)
+              ? StorePage(
+                  embedInShell: true,
+                  forTicketPurchase: _openedStoreForTicketPurchase,
+                )
               : const StoreLockedPage(embedInShell: true),
           const MeditationPage(embedInShell: true),
           const PublicConsultationsPage(),

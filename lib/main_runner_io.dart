@@ -73,7 +73,8 @@ Future<void> runAppAsync() async {
 
   runApp(const ProviderScope(child: AuraFaceApp()));
 
-  if (NotificationLaunchRouter.skipOpeningSplash) {
+  // 通知タップで chatId があるときだけ再遷移（スプラッシュ省略のみでは RootGate が既に占い相談を開く）
+  if (NotificationLaunchRouter.skipOpeningSplash && AppNavigation.hasPendingConsultationChat) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(AppNavigation.openConsultationChat());
     });
