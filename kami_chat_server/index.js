@@ -16,8 +16,6 @@ const { applySecurityMiddleware } = require("./securitySetup");
 const { requireAuth, requireAdmin, requireAdminOrMailToken } = require("./middleware/auth");
 const adminAuthRoutes = require("./routes/adminAuth");
 const billingRoutes = require("./routes/billing");
-const { createBillingRouter } = require("../server/billing_api");
-const { verifyBearerToken } = require("./firebaseVerify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -25,7 +23,6 @@ const PORT = process.env.PORT || 3000;
 applySecurityMiddleware(app);
 app.use(adminAuthRoutes);
 app.use(billingRoutes);
-app.use(createBillingRouter(idb.getDb(), verifyBearerToken));
 
 // メモリ保存: chatId -> [{ id, role, text, createdAt, consultationType? }, ...]
 const store = new Map();
