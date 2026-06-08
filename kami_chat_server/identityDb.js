@@ -85,7 +85,45 @@ create table if not exists messages (
   _migrateChatThreadsLastMessage(db);
   _migratePushNotificationLog(db);
   _migrateFcmDeviceTokens(db);
+  _migrateBillingTables(db);
   return db;
+}
+
+function _migrateBillingTables(db) {
+  try {
+    db.exec(`
+CREATE TABLE IF NOT EXISTS purchases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  purchase_token TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  product_id TEXT NOT NULL,
+  purchase_token TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tickets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_user_id ON chat_threads(user_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_token ON purchases(purchase_token);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
+`);
+  } catch (e) {
+    console.error("[identityDb] migrate billing tables", e);
+  }
 }
 
 function _migrateFcmDeviceTokens(db) {

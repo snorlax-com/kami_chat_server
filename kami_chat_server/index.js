@@ -1,6 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const cors = require("cors");
 const sendConsultationMail = require("./mail/sendConsultationMail");
 const types = require("./constants/consultationTypes");
 const urgentReception = require("./config/urgentReception");
@@ -13,9 +12,20 @@ const {
   isFirebaseConfigured,
   getFirebaseHealthSnapshot,
 } = require("./firebaseVerify");
+const { applySecurityMiddleware } = require("./securitySetup");
+const { requireAuth, requireAdmin, requireAdminOrMailToken } = require("./middleware/auth");
+const adminAuthRoutes = require("./routes/adminAuth");
+const billingRoutes = require("./routes/billing");
+const { createBillingRouter } = require("../server/billing_api");
+const { verifyBearerToken } = require("./firebaseVerify");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+applySecurityMiddleware(app);
+app.use(adminAuthRoutes);
+app.use(billingRoutes);
+app.use(createBillingRouter(idb.getDb(), verifyBearerToken));
 
 // メモリ保存: chatId -> [{ id, role, text, createdAt, consultationType? }, ...]
 const store = new Map();
@@ -36,9 +46,16 @@ function pruneChatMessagesInStore() {
   }
 }
 
-app.use(cors());
 app.use(express.json({ limit: "200kb" }));
 app.use(express.urlencoded({ extended: true }));
+
+function assertUserOwnsChat(req, chatId) {
+  const uid = req.user && req.user.userId;
+  if (!uid) return false;
+  const owner = idb.resolveUserIdForChat(chatId);
+  if (!owner) return String(chatId).includes(uid);
+  return owner === uid;
+}
 
 function escapeHtml(str = "") {
   return String(str)
@@ -72,15 +89,20 @@ app.get("/health", (req, res) => {
     firebaseAdmin: fb.firebaseAdmin,
     firebaseCredentialEnv: fb.firebaseCredentialEnv,
     firebaseInitFailureCode: fb.firebaseInitFailureCode,
+    mailApiBuild: "v2-consultation-tier-r12-emergency-retry",
   });
 });
 
 // --- POST /api/chat/send（保存 + Resend で開発者Gmail。メール失敗時も 200 + mailSent:false）
-app.post("/api/chat/send", async (req, res) => {
+app.post("/api/chat/send", requireAuth, async (req, res) => {
   try {
     pruneChatMessagesInStore();
     const body = req.body || {};
-    const { userId, chatId, message, userName } = body;
+    const { userId: bodyUserId, chatId, message, userName } = body;
+    const userId = req.user.userId;
+    if (bodyUserId && String(bodyUserId).trim() !== userId) {
+      return res.status(403).json({ status: "error", message: "userId mismatch" });
+    }
     const { cleanText, embeddedTierRaw } = types.extractEmbeddedConsultationTier(
       message != null ? String(message) : ""
     );
@@ -149,19 +171,13 @@ app.post("/api/chat/send", async (req, res) => {
       chatId: cid,
       messageId: id,
       consultationType,
-      /** Render / ターミナルで grep しやすい */
       mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
-      text: text.slice(0, 80),
+      messageLength: text.length,
     });
     if (consultationType === types.PRIORITY_GUIDANCE) {
-      console.log(
-        "[MAIL_URGENT] priority_guidance 至急相談 — chatId=%s messageId=%s userId=%s",
-        cid,
-        id,
-        userId || ""
-      );
+      console.log("[MAIL_URGENT] priority_guidance chatId=%s messageId=%s", cid, id);
     } else {
-      console.log("[MAIL_NORMAL] normal consultation — chatId=%s messageId=%s", cid, id);
+      console.log("[MAIL_NORMAL] normal consultation chatId=%s messageId=%s", cid, id);
     }
 
     let mailResult = null;
@@ -188,7 +204,6 @@ app.post("/api/chat/send", async (req, res) => {
       console.log("[chat/send] mail_sent resend_ok", {
         messageId: id,
         consultationType,
-        to: mailResult?.debugMailTo ?? null,
         mailId: mailResult?.id,
       });
     } catch (err) {
@@ -200,7 +215,7 @@ app.post("/api/chat/send", async (req, res) => {
       });
     }
 
-    const bridgeUserId = String((body || {}).userId || "").trim();
+    const bridgeUserId = userId;
     const fcmToken = String((body || {}).fcmToken || "").trim();
     const fcmPlatform = String((body || {}).fcmPlatform || "android").trim().slice(0, 16);
     if (bridgeUserId && fcmToken) {
@@ -240,7 +255,11 @@ app.post("/api/chat/send", async (req, res) => {
       mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
       mailSubject: mailError ? null : mailResult?.subject ?? null,
       mailFromDisplay: mailError ? null : mailResult?.fromDisplay ?? null,
-      mailApiBuild: "v2-consultation-tier-r11-override-normal-if-embedded-urgent",
+      mailApiBuild: "v2-consultation-tier-r12-emergency-retry",
+      mailEmergencyDelivered:
+        mailError || mailResult?.mailEmergencyDelivered == null
+          ? null
+          : mailResult.mailEmergencyDelivered === true,
       debugReceivedConsultationType,
       debugReceivedUrgent,
       debugReceivedConsultationPriority,
@@ -265,9 +284,12 @@ app.post("/api/chat/send", async (req, res) => {
   }
 });
 
-app.get("/api/chat/thread", (req, res) => {
+app.get("/api/chat/thread", requireAuth, (req, res) => {
   pruneChatMessagesInStore();
   const chatId = req.query.chatId || "default";
+  if (!assertUserOwnsChat(req, chatId)) {
+    return res.status(403).json({ status: "error", message: "forbidden" });
+  }
   const list = store.get(chatId) || [];
   const since = req.query.since ? Number(req.query.since) : null;
   const messages =
@@ -301,8 +323,11 @@ app.get("/api/chat/thread", (req, res) => {
   res.json({ status: "ok", chatId, messages: messagesOut, retentionExpired });
 });
 
-// テスト用: 開発者返信を追加
-app.post("/api/chat/dev-reply", async (req, res) => {
+// テスト用: 開発者返信を追加（本番では無効）
+app.post("/api/chat/dev-reply", requireAuth, requireAdmin, async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(404).json({ status: "error", message: "not found" });
+  }
   pruneChatMessagesInStore();
   const { chatId, text } = req.body || {};
   const cid = chatId || "default";
@@ -319,7 +344,7 @@ app.post("/api/chat/dev-reply", async (req, res) => {
   } catch (e) {
     console.error("[chat/dev-reply] bumpThreadLastMessageAtMs", e);
   }
-  console.log("[chat/dev-reply]", { chatId: cid, text: msg });
+  console.log("[chat/dev-reply]", { chatId: cid, messageLength: msg.length });
   let push = { skipped: true, reason: "pending" };
   try {
     push = await sendDeveloperReplyPush({ chatId: cid, messageId: id, role: "dev" });
@@ -416,17 +441,12 @@ app.get("/admin/reply", (req, res) => {
   }
 });
 
-// --- POST /admin/reply
-app.post("/admin/reply", async (req, res) => {
+// --- POST /admin/reply（メール HMAC または管理者 JWT）
+app.post("/admin/reply", requireAdminOrMailToken, async (req, res) => {
   try {
     pruneChatMessagesInStore();
     const { chatId, token, expires, message, consultationType: bodyConsultationType } = req.body || {};
     const effectiveConsultationType = types.normalizeConsultationType(bodyConsultationType);
-
-    if (!verifyToken(chatId, token, expires)) {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.status(403).send("invalid or expired token");
-    }
 
     const text = String(message || "").trim();
     if (!text) {
