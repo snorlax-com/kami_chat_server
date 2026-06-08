@@ -4,3 +4,7 @@ node_modules
 # Firebase サービスアカウント（ローカルは FIREBASE_SERVICE_ACCOUNT_PATH で参照）
 secrets/*.json
 secrets/render-*.txt
+
+data/
+*.sqlite-shm
+*.sqlite-wal
