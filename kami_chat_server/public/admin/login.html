@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AuraFace 管理者ログイン</title>
+  <style>
+    body { font-family: sans-serif; max-width: 400px; margin: 48px auto; padding: 0 16px; }
+    label { display: block; margin-top: 12px; }
+    input { width: 100%; padding: 8px; box-sizing: border-box; }
+    button { margin-top: 16px; padding: 10px 16px; width: 100%; }
+    .err { color: #b91c1c; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>管理者ログイン</h1>
+  <form id="loginForm">
+    <label>メール<input type="email" name="email" required autocomplete="username" /></label>
+    <label>パスワード<input type="password" name="password" required autocomplete="current-password" /></label>
+    <button type="submit">ログイン</button>
+    <p class="err" id="err" hidden></p>
+  </form>
+  <script>
+    const form = document.getElementById("loginForm");
+    const errEl = document.getElementById("err");
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errEl.hidden = true;
+      const fd = new FormData(form);
+      const res = await fetch("/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: fd.get("email"),
+          password: fd.get("password"),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        errEl.textContent = data.error || "ログインに失敗しました";
+        errEl.hidden = false;
+        return;
+      }
+      localStorage.setItem("admin_token", data.token);
+      const next = new URLSearchParams(location.search).get("next");
+      location.href = next || "/";
+    });
+  </script>
+</body>
+</html>

@@ -6,7 +6,10 @@ const { buildConsultationNotification } = require("./buildConsultationNotificati
 const { buildAdminReplyUrl } = require("./buildAdminReplyUrl");
 const types = require("../constants/consultationTypes");
 const { withDisplayName } = require("./mailFrom");
-const { resolveConsultationNotificationRecipients } = require("./resolveConsultationNotificationRecipients");
+const {
+  resolveConsultationNotificationRecipients,
+  resolveEmergencyRecipient,
+} = require("./resolveConsultationNotificationRecipients");
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const MAIL_FROM = (process.env.MAIL_FROM || "").trim();
@@ -114,8 +117,7 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
 
   console.log("[sendConsultationMail] pre_resend_send", {
     consultationType,
-    resolvedRecipients: recipients,
-    subject,
+    recipientCount: recipients.length,
     fromName,
   });
 
@@ -179,13 +181,27 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
     const mid = result.data && typeof result.data === "object" ? result.data.id : null;
     console.log("[sendConsultationMail] resend_ok", {
       consultationType,
-      to: toSingle,
       recipientIndex: index,
       recipientTotal: total,
       mailId: mid,
     });
     return result;
   };
+
+  const emergencyRecipient = resolveEmergencyRecipient();
+  const emergencyRecipientNorm = String(emergencyRecipient || "").trim().toLowerCase();
+
+  function isEmergencyRecipient(addr) {
+    return String(addr || "").trim().toLowerCase() === emergencyRecipientNorm;
+  }
+
+  function emergencyDeliveredFromFailures(failureList) {
+    if (consultationType !== types.PRIORITY_GUIDANCE) return null;
+    if (!emergencyRecipientNorm) return null;
+    const emergencyInRecipients = recipients.some((r) => isEmergencyRecipient(r));
+    if (!emergencyInRecipients) return null;
+    return !failureList.some((f) => isEmergencyRecipient(f.to));
+  }
 
   let result;
   try {
@@ -194,7 +210,7 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
       /** sendOne が例外なく終わった回数（Resend が id を返さない場合でも成功とみなす） */
       let deliveredOk = 0;
       /** @type {{ to: string, message: string }[]} */
-      const failures = [];
+      let failures = [];
       /** @type {object|null} */
       let lastOkData = null;
 
@@ -221,6 +237,38 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
         }
       }
 
+      const emergencyAddr = recipients.find((r) => isEmergencyRecipient(r));
+      const emergencyFailed = emergencyAddr && failures.some((f) => isEmergencyRecipient(f.to));
+      if (emergencyFailed && emergencyAddr) {
+        for (let retry = 0; retry < 2; retry++) {
+          await new Promise((resolve) => setTimeout(resolve, 700 * (retry + 1)));
+          try {
+            const r = await sendOne(emergencyAddr, recipients.length + retry + 1, recipients.length);
+            deliveredOk += 1;
+            failures = failures.filter((f) => !isEmergencyRecipient(f.to));
+            const id = r.data && typeof r.data === "object" ? r.data.id : null;
+            if (id) mailIds.push(id);
+            lastOkData = r.data && typeof r.data === "object" ? r.data : lastOkData;
+            console.log("[sendConsultationMail] emergency_retry_ok", {
+              consultationType,
+              to: emergencyAddr,
+              retry: retry + 1,
+            });
+            break;
+          } catch (err) {
+            const msg = err && err.message ? err.message : String(err);
+            failures = failures.filter((f) => !isEmergencyRecipient(f.to));
+            failures.push({ to: emergencyAddr, message: `retry${retry + 1}: ${msg}` });
+            console.error("[sendConsultationMail] emergency_retry_failed", {
+              consultationType,
+              to: emergencyAddr,
+              retry: retry + 1,
+              error: msg,
+            });
+          }
+        }
+      }
+
       if (deliveredOk === 0) {
         const detail =
           failures.length > 0
@@ -229,6 +277,8 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
         throw new Error(`至急通知メールが全宛先で失敗しました: ${detail}`);
       }
 
+      const mailEmergencyDelivered = emergencyDeliveredFromFailures(failures);
+
       if (failures.length > 0) {
         console.warn("[sendConsultationMail] partial_mail_success", {
           consultationType,
@@ -236,6 +286,7 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
           mailIdCount: mailIds.length,
           failedCount: failures.length,
           failures,
+          mailEmergencyDelivered,
         });
       }
 
@@ -248,8 +299,21 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
         consultationType,
         mailUrgent: true,
         debugMailTo: recipients,
+        mailEmergencyDelivered,
         ...(failures.length > 0 ? { mailPartialFailures: failures } : {}),
       };
+    }
+
+    if (consultationType === types.PRIORITY_GUIDANCE && recipients.length === 1) {
+      const only = recipients[0];
+      const emergencyOnly =
+        emergencyRecipientNorm && isEmergencyRecipient(only);
+      console.log("[sendConsultationMail] priority_single_recipient", {
+        consultationType,
+        to: only,
+        emergencyOnly,
+        emergencyRecipient,
+      });
     }
 
     result = await resend.emails.send({
@@ -277,6 +341,11 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
     );
   }
 
+  const mailEmergencyDelivered =
+    consultationType === types.PRIORITY_GUIDANCE
+      ? recipients.some((r) => isEmergencyRecipient(r))
+      : null;
+
   return {
     ...(result.data && typeof result.data === "object" ? result.data : {}),
     subject,
@@ -284,6 +353,7 @@ async function sendConsultationMail(chatId, message, userName, userId, meta = {}
     consultationType,
     mailUrgent: consultationType === types.PRIORITY_GUIDANCE,
     debugMailTo: recipients,
+    mailEmergencyDelivered,
   };
 }
 
