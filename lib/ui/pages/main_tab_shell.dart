@@ -28,6 +28,7 @@ import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/services/iap_service.dart';
 import 'package:kami_face_oracle/bootstrap/deferred_startup.dart';
+import 'package:kami_face_oracle/services/app_startup_flow_coordinator.dart';
 
 const Color _kNavSelected = Color(0xFF8B5CF6);
 const Color _kNavUnselected = Color(0xFF9CA3AF);
@@ -100,9 +101,9 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await DeferredStartup.awaitReady(timeout: const Duration(seconds: 10));
       if (!mounted) return;
-      // 占い相談タブでは送信操作を遮らない（通知案内はホーム表示時のみ）
+      // 通知許可は占い相談タブを開く直前に案内（起動直後は年齢・ポリシーのみ）。
       if (_index == 0) {
-        await NotificationPermissionPrompt.maybeShow(context);
+        AppStartupFlowCoordinator.scheduleTutorialLaunchOnce();
       }
     });
     if (_index == 3) {
@@ -226,7 +227,7 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       final kind = isUrgent ? '至急券' : '通常券';
       StoreUiHelper.showSnack('$label を購入しました（+$tickets $kind）', backgroundColor: Colors.green);
     }
-    unawaited(AppNavigation.completeTicketPackPurchaseFromStore());
+    AppNavigation.returnToConsultationAfterStorePurchase();
   }
 
   /// 占い相談などからストアタブへ。
@@ -330,6 +331,9 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
       if (tabChanged) {
         unawaited(AppNavigation.restoreConsultationDraftNow());
         AppNavigation.scrollConsultationToLatest.value++;
+        if (mounted) {
+          unawaited(NotificationPermissionPrompt.maybeShow(context));
+        }
       }
       unawaited(_refreshConsultationUnread());
     }

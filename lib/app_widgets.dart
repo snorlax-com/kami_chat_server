@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/core/e2e.dart';
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
 import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/ui/pages/main_tab_shell.dart';
 import 'package:kami_face_oracle/ui/pages/tutorial_camera_page.dart';
@@ -14,9 +16,8 @@ import 'package:kami_face_oracle/services/notification_launch_router.dart';
 import 'package:kami_face_oracle/services/push_notification_service.dart';
 import 'package:kami_face_oracle/core/portrait_lock.dart';
 
-/// 統合テストで占い相談メール送信テスト時に true（--dart-define=INTEGRATION_TEST_CONSULTATION=true）
-bool get _integrationTestConsultation =>
-    bool.fromEnvironment('INTEGRATION_TEST_CONSULTATION', defaultValue: false);
+/// 統合テストで占い相談メール送信テスト時に true
+bool get _integrationTestConsultation => IntegrationTestFlags.bypassConsultationFirebaseAuth;
 
 /// MaterialApp とルートウィジェット（main の runner から参照）
 class AuraFaceApp extends StatelessWidget {
@@ -37,8 +38,16 @@ class AuraFaceApp extends StatelessWidget {
       );
     }
     // E2E: ?e2e=1&route=camera でカメラ画面を直接表示（CanvasKit で DOM にテキストが出ないためテストを安定化）
-    final useE2ECameraRoute =
-        E2E.isEnabled && (Uri.base.queryParameters['route'] == 'camera' || Uri.base.queryParameters['camera'] == '1');
+    final useE2ECameraRoute = IntegrationTestFlags.cameraRoute ||
+        (E2E.isEnabled &&
+            (Uri.base.queryParameters['route'] == 'camera' ||
+                Uri.base.queryParameters['camera'] == '1'));
+    if (kDebugMode && E2E.isEnabled) {
+      debugPrint(
+        '[AuraFaceApp] E2E home route: '
+        'camera=$useE2ECameraRoute consultation=$_integrationTestConsultation',
+      );
+    }
     return PortraitLockScope(
       child: MaterialApp(
         navigatorKey: appNavigatorKey,
@@ -47,8 +56,10 @@ class AuraFaceApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         home: useE2ECameraRoute
             ? const TutorialCameraPage(currentStep: 'neutral', forceE2ESkipCamera: true)
-            : NotificationLaunchRouter.skipOpeningSplash
-                ? const RootGate(initialTabIndex: 1)
+            : (E2E.isEnabled || NotificationLaunchRouter.skipOpeningSplash)
+                ? RootGate(
+                    initialTabIndex: NotificationLaunchRouter.skipOpeningSplash ? 1 : 0,
+                  )
                 : const SplashVideoPage(next: RootGate()),
       ),
     );

@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/config/mail_bridge_config.dart';
+import 'package:kami_face_oracle/services/auth_api_headers.dart';
+import 'package:kami_face_oracle/testing/integration_test_consultation_mail_stub.dart';
 
 /// Render 無料枠の初回遅延を考慮したタイムアウト（秒）
 const int _kTimeoutSeconds = 60;
@@ -318,21 +320,39 @@ class AuraFaceChatMailService {
       'X-AuraFace-Consultation-Type': ct,
     };
 
-    _logSendLine('wire_headers json=${jsonEncode(headerMap)}');
-    _logSendLine('wire_body_json=$bodyStr');
-    _logSendLine('wire_message_final=$payloadMessage');
+    var authHeaders = await AuthApiHeaders.authorizationJson();
+    if (!authHeaders.containsKey('Authorization')) {
+      if (await IntegrationTestConsultationMailStub.isEnabled()) {
+        authHeaders = {'Authorization': 'Bearer integration_test_stub'};
+      } else {
+        return SendChatResponse(success: false, error: 'ログインが必要です。');
+      }
+    }
+    final headers = {...headerMap, ...authHeaders};
+
+    if (kDebugMode) {
+      _logSendLine('wire_headers keys=${headers.keys.join(",")}');
+      _logSendLine('wire_body messageLength=${payloadMessage.length}');
+    }
 
     try {
       final postTimeoutSeconds =
           urgent ? _kTimeoutSecondsUrgentPost : _kTimeoutSeconds;
-      _log('[MailBridge] POST $uri body=$bodyStr timeoutSec=$postTimeoutSeconds');
-      final res = await http
-          .post(
-            uri,
-            headers: headerMap,
-            body: bodyStr,
-          )
-          .timeout(Duration(seconds: postTimeoutSeconds));
+      _log('[MailBridge] POST $uri timeoutSec=$postTimeoutSeconds');
+      final useStub = await IntegrationTestConsultationMailStub.isEnabled();
+      final res = useStub
+          ? await IntegrationTestConsultationMailStub.postSend(
+              uri: uri,
+              headers: headers,
+              body: bodyStr,
+            )
+          : await http
+              .post(
+                uri,
+                headers: headers,
+                body: bodyStr,
+              )
+              .timeout(Duration(seconds: postTimeoutSeconds));
 
       Map<String, dynamic>? body;
       try {
@@ -382,6 +402,7 @@ class AuraFaceChatMailService {
           mailError: (mailSent == false && mailErr != null && mailErr.isNotEmpty) ? mailErr : null,
           consultationType: responseCt,
           mailUrgent: mailUrgent,
+          mailEmergencyDelivered: _coerceBool(body['mailEmergencyDelivered']),
           mailSubject: body['mailSubject'] as String?,
           mailFromDisplay: body['mailFromDisplay'] as String?,
           mailApiBuild: body['mailApiBuild'] as String?,
@@ -415,6 +436,7 @@ class AuraFaceChatMailService {
       'debugMailSubject',
       'debugMailTo',
       'debugMailPartialFailures',
+      'mailEmergencyDelivered',
     ];
     final out = <String, dynamic>{};
     for (final k in keys) {
@@ -432,8 +454,21 @@ class AuraFaceChatMailService {
     if (since != null) query['since'] = since.toString();
     final uri = Uri.parse('$baseUrl/api/chat/thread').replace(queryParameters: query);
     try {
+      var authHeaders = await AuthApiHeaders.authorizationJson();
+      if (!authHeaders.containsKey('Authorization')) {
+        if (await IntegrationTestConsultationMailStub.isEnabled()) {
+          authHeaders = {'Authorization': 'Bearer integration_test_stub'};
+        } else {
+          return ThreadResponse(success: false, error: 'ログインが必要です。');
+        }
+      }
       _log('[MailBridge] GET $uri');
-      final res = await http.get(uri).timeout(const Duration(seconds: _kTimeoutSeconds));
+      final useStub = await IntegrationTestConsultationMailStub.isEnabled();
+      final res = useStub
+          ? await IntegrationTestConsultationMailStub.getThread(uri: uri, headers: authHeaders)
+          : await http
+              .get(uri, headers: authHeaders)
+              .timeout(const Duration(seconds: _kTimeoutSeconds));
 
       if (res.body.isEmpty) {
         _log('[MailBridge] thread empty response status=${res.statusCode}');
@@ -546,6 +581,9 @@ class SendChatResponse {
   /// サーバーがメールを「至急」テンプレで送ったか。未対応サーバーでは null。
   final bool? mailUrgent;
 
+  /// 至急時に緊急通知先（emergencyauraface@gmail.com 等）へ届いたか。未対応サーバーでは null。
+  final bool? mailEmergencyDelivered;
+
   /// 実際に Resend に渡した件名（デバッグ・Gmail 照合用）。
   final String? mailSubject;
 
@@ -567,6 +605,7 @@ class SendChatResponse {
     this.mailError,
     this.consultationType,
     this.mailUrgent,
+    this.mailEmergencyDelivered,
     this.mailSubject,
     this.mailFromDisplay,
     this.mailApiBuild,

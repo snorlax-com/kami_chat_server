@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 
 /// メールブリッジのチャットスレッドを **端末に保存**（オフライン閲覧・サーバー揮発時の復元）。
@@ -29,6 +30,26 @@ class BridgeThreadLocalStore {
   static String _normalizeText(String text) =>
       text.trim().replaceAll(RegExp(r'\s+'), ' ');
 
+  /// サーバーが古いメッセージを `normal` 既定で返しても、端末側の `priority_guidance` を潰さない。
+  static BridgeChatMessage _mergeConsultationType(
+    BridgeChatMessage primary,
+    BridgeChatMessage? secondary,
+  ) {
+    final a = primary.consultationType?.trim();
+    final b = secondary?.consultationType?.trim();
+    if (a == ConsultationMailType.priorityGuidance ||
+        b == ConsultationMailType.priorityGuidance) {
+      return BridgeChatMessage(
+        id: primary.id,
+        role: primary.role,
+        text: primary.text,
+        createdAt: primary.createdAt,
+        consultationType: ConsultationMailType.priorityGuidance,
+      );
+    }
+    return primary;
+  }
+
   /// ローカル先行表示とサーバー取得の同一メッセージを統合（messageId 優先）。
   static List<BridgeChatMessage> merge(
     List<BridgeChatMessage> local,
@@ -40,8 +61,12 @@ class BridgeThreadLocalStore {
     void put(BridgeChatMessage m, {required bool serverWins}) {
       if (m.id > 0) {
         final prev = byId[m.id];
-        if (prev == null || serverWins) {
+        if (prev == null) {
           byId[m.id] = m;
+        } else if (serverWins) {
+          byId[m.id] = _mergeConsultationType(m, prev);
+        } else {
+          byId[m.id] = _mergeConsultationType(m, prev);
         }
         return;
       }

@@ -186,4 +186,9 @@ class Storage {
     final sp = await SharedPreferences.getInstance();
     return sp.getString(_tutorialDeityKey);
   }
+
+  static Future<void> clearTutorialDeity() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.remove(_tutorialDeityKey);
+  }
 }

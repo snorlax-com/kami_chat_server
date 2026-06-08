@@ -4,20 +4,30 @@ import 'dart:io' if (dart.library.html) 'package:kami_face_oracle/core/io_stub.d
 import 'package:http/http.dart' as http;
 import 'package:kami_face_oracle/core/personality_tree_classifier.dart';
 import 'package:kami_face_oracle/features/consent/consent_service.dart';
+import 'package:kami_face_oracle/config/diagnosis_server_config.dart';
+import 'package:kami_face_oracle/services/auth_api_headers.dart';
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
 /// サーバーで性格診断を実行するサービス
 class ServerPersonalityService {
-  // サーバーURL（環境変数や設定ファイルから読み込むことも可能）
-  static const String serverUrl = 'http://45.77.26.42:8000';
+  static String get serverUrl => DiagnosisServerConfig.baseUrl;
   static const String apiKey = ''; // 必要に応じて設定
+
+  static void _log(String msg) {
+    if (kDebugMode) debugPrint('[ServerPersonalityService] $msg');
+  }
 
   /// 撮影後・正面判定。同意不要。OK なら is_frontal: true、NG なら reasons / suggestion を返す。
   static Future<Map<String, dynamic>> validateFace(List<int> jpegBytes) async {
     final uri = Uri.parse('$serverUrl/validate_face');
+    final auth = await AuthApiHeaders.authorizationJson();
     final res = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/octet-stream'},
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            ...auth,
+          },
           body: jpegBytes,
         )
         .timeout(
@@ -48,7 +58,7 @@ class ServerPersonalityService {
     String filename,
   ) async {
     try {
-      print('[ServerPersonalityService] サーバーに画像を送信中（bytes）... size=${bytes.length} filename=$filename');
+      _log('predict send bytes size=${bytes.length}');
       final sessionId = await ConsentService.instance.getOrCreateSessionId();
       final request = http.MultipartRequest(
         'POST',
@@ -56,6 +66,8 @@ class ServerPersonalityService {
       );
       request.headers['X-Consent-Session-ID'] = sessionId;
       if (apiKey.isNotEmpty) request.headers['X-API-Key'] = apiKey;
+      final auth = await AuthApiHeaders.authorizationJson();
+      request.headers.addAll(auth);
       request.files.add(http.MultipartFile.fromBytes(
         'file',
         bytes,
@@ -69,20 +81,20 @@ class ServerPersonalityService {
         const Duration(seconds: 120),
         onTimeout: () => throw TimeoutException('サーバーからの応答の受信がタイムアウトしました'),
       );
-      print('[ServerPersonalityService] 応答: status=${response.statusCode} bodyLength=${response.body.length}');
+      _log('predict response status=${response.statusCode} len=${response.body.length}');
       if (response.statusCode == 200) {
         final jsonData = json.decode(response.body) as Map<String, dynamic>;
         final serverInference = jsonData['server_inference'] as bool?;
         if (serverInference != true) throw Exception('サーバー推論が確認できませんでした。');
-        print('[ServerPersonalityService] ✅ サーバー推論成功（bytes）');
+        _log('predict ok');
         return _convertServerResponseToResult(jsonData);
       }
       if (response.statusCode == 403) {
-        print('[ServerPersonalityService] ❌ 403 Consent required');
+        _log('predict 403 consent required');
         throw Exception('CONSENT_REQUIRED');
       }
       final msg = _statusCodeToMessage(response.statusCode);
-      print('[ServerPersonalityService] ❌ サーバーエラー: ${response.statusCode}');
+      _log('predict error status=${response.statusCode}');
       throw Exception(msg);
     } catch (e, stackTrace) {
       if (e is TimeoutException) {
@@ -116,6 +128,8 @@ class ServerPersonalityService {
       );
       request.headers['X-Consent-Session-ID'] = sessionId;
       if (apiKey.isNotEmpty) request.headers['X-API-Key'] = apiKey;
+      final auth = await AuthApiHeaders.authorizationJson();
+      request.headers.addAll(auth);
       request.files.add(
         await http.MultipartFile.fromPath(
           'file',
@@ -163,10 +177,10 @@ class ServerPersonalityService {
 
         return result;
       } else if (response.statusCode == 403) {
-        print('[ServerPersonalityService] ❌ 403 Consent required');
+        _log('predict 403 consent required');
         throw Exception('CONSENT_REQUIRED');
       } else {
-        print('[ServerPersonalityService] ❌ サーバーエラー: ${response.statusCode}');
+        _log('predict error status=${response.statusCode}');
         print('[ServerPersonalityService] レスポンス: ${response.body}');
         throw Exception('サーバーエラー: ${response.statusCode}');
       }

@@ -3,11 +3,11 @@
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:kami_face_oracle/services/server_personality_service.dart';
+import 'package:kami_face_oracle/config/diagnosis_server_config.dart';
 
 class SupportChatService {
-  static const String _defaultApiUrl = 'http://45.77.26.42:8000';
-  static const String _apiKey = 'CHANGE_ME_SUPER_SECRET'; // TODO: 環境変数やRemote Configから取得
+  static String get _defaultApiUrl => DiagnosisServerConfig.baseUrl;
+  static const String _apiKey = String.fromEnvironment('SUPPORT_API_KEY', defaultValue: '');
 
   String? _apiUrl;
 

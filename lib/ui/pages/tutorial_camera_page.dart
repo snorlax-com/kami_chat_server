@@ -144,10 +144,10 @@ class _TutorialCameraPageState extends State<TutorialCameraPage> with WidgetsBin
       ),
     );
 
-    // 直接ルート（route=camera）で開いたときだけカメラをスキップ。通常の「カメラで撮影」から来た場合は撮影画面を表示する。
-    if (kIsWeb && E2E.isEnabled && widget.forceE2ESkipCamera) {
+    // 直接ルート（route=camera / integration_test）で開いたときだけカメラをスキップ。
+    if (widget.forceE2ESkipCamera) {
       _e2eMode = true;
-      Future.delayed(const Duration(milliseconds: 1500), () {
+      Future.delayed(const Duration(milliseconds: 800), () {
         if (mounted) _onCapturedBytesE2E();
       });
       return;

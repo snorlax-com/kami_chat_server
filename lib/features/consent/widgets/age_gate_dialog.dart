@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/core/e2e.dart';
 import 'package:kami_face_oracle/features/consent/consent_service.dart';
@@ -112,6 +114,17 @@ class _AgeGateWrapperState extends State<AgeGateWrapper> {
     );
   }
 
+  Future<void> _afterConsentReady() async {
+    await _maybeShowCookieBanner();
+  }
+
+  void _scheduleAfterConsentReady() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_afterConsentReady());
+    });
+  }
+
   Future<void> _check() async {
     if (E2E.isEnabled) {
       if (!mounted) return;
@@ -132,11 +145,7 @@ class _AgeGateWrapperState extends State<AgeGateWrapper> {
         _checked = true;
         _allowed = true;
       });
-      if (!mounted) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _maybeShowCookieBanner();
-      });
+      _scheduleAfterConsentReady();
       return;
     }
     final result = await AgeGateDialog.show(context);
@@ -153,11 +162,7 @@ class _AgeGateWrapperState extends State<AgeGateWrapper> {
         _checked = true;
         _allowed = true;
       });
-      if (!mounted) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _maybeShowCookieBanner();
-      });
+      _scheduleAfterConsentReady();
     } else {
       setState(() {
         _checked = true;

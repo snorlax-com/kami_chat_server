@@ -7,6 +7,9 @@
 const express = require('express');
 
 const CANONICAL_PRODUCTS = new Set([
+  'monthly_subscription_500',
+  'normal_ticket_600',
+  'urgent_ticket_10000',
   'subscription_monthly_500',
   'ticket_normal_600',
   'ticket_urgent_10000',

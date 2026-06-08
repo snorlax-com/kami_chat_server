@@ -18,6 +18,8 @@ import 'package:kami_face_oracle/ui/pages/skin_diagnosis_result_page.dart';
 import 'package:kami_face_oracle/core/tutorial_classifier.dart';
 import 'package:kami_face_oracle/core/personality_tree_classifier.dart';
 import 'package:kami_face_oracle/ui/pages/personality_diagnosis_result_page.dart';
+import 'package:kami_face_oracle/ui/widgets/tutorial_guest_exit_actions.dart';
+import 'package:kami_face_oracle/ui/widgets/tutorial_guest_exit_scope.dart';
 import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/services/skin_analysis_ai_service.dart';
 import 'package:kami_face_oracle/services/personality_type_detail_service.dart';
@@ -71,6 +73,7 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
   late final Animation<double> _spin; // ぐるぐる演出用
   Deity? _actualGod; // 実際に表示する神（サーバー結果から取得）
   bool _pillarRevealMeditationScheduled = false;
+  bool _openedPersonalityResult = false;
 
   // 顔輪郭アニメーション用
   ui.Image? _tutorialImage;
@@ -137,11 +140,20 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
     // 最終表示フェーズへ（チュートリアルの場合はアニメーション完了後に表示）
     // チュートリアルモードでは、アニメーション完了後に_showFinalをtrueにするため、ここでは設定しない
     if (!widget.isTutorial || (widget.tutorialImagePath == null && widget.tutorialImageBytes == null)) {
-      // 通常モードは2秒後
-      Timer(const Duration(milliseconds: 2000), () async {
+      // 通常モードは2秒後（E2E疑似撮影は画像なしのため短縮して結果画面へ）
+      final revealDelay = E2E.isEnabled && widget.isTutorial
+          ? const Duration(milliseconds: 400)
+          : const Duration(milliseconds: 2000);
+      Timer(revealDelay, () async {
         if (!mounted) return;
         setState(() => _showFinal = true);
-        await _tryStartRevealMeditationForPersonalityDiagnosis();
+        await _onTutorialRevealFinalShown();
+      });
+    } else if (widget.isTutorial && widget.personalityDiagnosisResult != null) {
+      Timer(const Duration(seconds: 12), () {
+        if (!mounted || _showFinal) return;
+        debugPrint('[RevealPage] reveal phase timeout fallback');
+        unawaited(_finishTutorialRevealPhase());
       });
     }
     // 効果音または瞑想音楽を再生
@@ -205,12 +217,37 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
         _startFaceOutlineAnimation();
       }
     } catch (e) {
-      print('[RevealPage] 画像読み込みエラー: $e');
+      debugPrint('[RevealPage] 画像読み込みエラー: $e');
+      if (mounted) {
+        await _finishTutorialRevealPhase();
+      }
     }
   }
 
+  Future<void> _finishTutorialRevealPhase() async {
+    if (!mounted) return;
+    setState(() => _showFinal = true);
+    await _onTutorialRevealFinalShown();
+  }
+
   Future<void> _startFaceOutlineAnimation() async {
-    if (!mounted || widget.tutorialDetectedFaces == null || widget.tutorialDetectedFaces!.isEmpty) return;
+    if (!mounted) return;
+    if (widget.tutorialDetectedFaces == null || widget.tutorialDetectedFaces!.isEmpty) {
+      debugPrint('[RevealPage] skip face animation (no faces), show final');
+      await _finishTutorialRevealPhase();
+      return;
+    }
+
+    try {
+      await _runFaceOutlineAnimation();
+    } catch (e, st) {
+      debugPrint('[RevealPage] face animation error: $e\n$st');
+      await _finishTutorialRevealPhase();
+    }
+  }
+
+  Future<void> _runFaceOutlineAnimation() async {
+    if (!mounted) return;
 
     // 全てのコントローラーをリセット
     _faceOutlineController.reset();
@@ -256,18 +293,51 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
       await _mouthController.forward();
     }
 
-    // アニメーション完了後に神の降臨を表示
     if (mounted) {
       await Future.delayed(const Duration(milliseconds: 500));
-      setState(() {
-        _showFinal = true;
-      });
-      await _tryStartRevealMeditationForPersonalityDiagnosis();
+      await _finishTutorialRevealPhase();
+    }
+  }
+
+  /// 降臨表示後: 瞑想開始 → 性格診断結果画面へ（戻る確認は結果画面で行う）。
+  Future<void> _onTutorialRevealFinalShown() async {
+    await _tryStartRevealMeditationForPersonalityDiagnosis();
+    if (!widget.isTutorial || widget.personalityDiagnosisResult == null) return;
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_openTutorialPersonalityResultPage());
+    });
+  }
+
+  Future<void> _openTutorialPersonalityResultPage() async {
+    if (_openedPersonalityResult || !mounted) return;
+    _openedPersonalityResult = true;
+    final result = widget.personalityDiagnosisResult!;
+    if (!mounted) return;
+    try {
+      debugPrint('[RevealPage] navigate → PersonalityDiagnosisResultPage');
+      await Navigator.pushReplacement(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => PersonalityDiagnosisResultPage(
+            diagnosisResult: result,
+            isTutorialFlow: true,
+          ),
+        ),
+      );
+    } catch (e, st) {
+      _openedPersonalityResult = false;
+      debugPrint('[RevealPage] navigation to result failed: $e\n$st');
     }
   }
 
   /// サーバー結果から正しい神を取得
   Future<void> _loadActualGod() async {
+    if (E2E.isEnabled && widget.personalityDiagnosisResult != null) {
+      _actualGod = widget.god ?? deities.first;
+      if (mounted) setState(() {});
+      return;
+    }
     if (widget.personalityDiagnosisResult != null) {
       // サーバー結果からpillarIdを取得
       final detail = await PersonalityTypeDetailService.getDetail(widget.personalityDiagnosisResult!.personalityType);
@@ -580,14 +650,7 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
                   if (widget.isTutorial) {
                     // チュートリアルでは新しい性格診断結果ページへ
                     if (widget.personalityDiagnosisResult != null) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => PersonalityDiagnosisResultPage(
-                            diagnosisResult: widget.personalityDiagnosisResult!,
-                          ),
-                        ),
-                      );
+                      unawaited(_openTutorialPersonalityResultPage());
                     } else if (widget.diagnosisResult != null) {
                       // 旧診断結果がある場合（後方互換性）
                       final god = _actualGod ?? widget.god ?? deities.first;
@@ -673,9 +736,24 @@ class _RevealPageState extends State<RevealPage> with TickerProviderStateMixin {
         ),
       ),
     );
+    final needsGuestExitGuard = widget.isTutorial &&
+        widget.personalityDiagnosisResult != null &&
+        TutorialGuestExitActions.shouldConfirmExit(tutorialFlow: true);
+
     return Semantics(
       label: E2E.isEnabled ? 'e2e-result-screen' : '診断結果画面。性格診断と肌分析の結果を表示しています。',
-      child: scaffold,
+      child: TutorialGuestExitScope(
+        enabled: needsGuestExitGuard,
+        tutorialFlow: true,
+        onLogin: () async {
+          await TutorialGuestExitActions.signInWithGoogleOnly();
+          if (mounted) await _openTutorialPersonalityResultPage();
+        },
+        onExitWithoutLogin: () async {
+          await TutorialGuestExitActions.finishWithoutLogin(context);
+        },
+        child: scaffold,
+      ),
     );
   }
 }

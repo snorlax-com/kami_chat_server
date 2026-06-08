@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/services/bridge_thread_local_store.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
+import 'package:kami_face_oracle/services/consultation_chat_id.dart';
 import 'package:kami_face_oracle/services/consultation_identity.dart';
 import 'package:kami_face_oracle/services/consultation_mail_new_send.dart';
 import 'package:kami_face_oracle/services/consultation_access_service.dart';
@@ -26,6 +28,8 @@ import 'package:kami_face_oracle/services/consultation_active_thread_resolver.da
 import 'package:kami_face_oracle/services/store_access_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/services/consultation_send_history_service.dart';
+import 'package:kami_face_oracle/services/consultation_send_routing.dart';
+import 'package:kami_face_oracle/services/consultation_unified_thread.dart';
 import 'package:kami_face_oracle/services/store_ui_helper.dart';
 import 'package:kami_face_oracle/services/sideload_billing_service.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
@@ -99,6 +103,23 @@ void _showMailSentFeedback(
     return;
   }
 
+  final emergencyDelivered = bridge?.mailEmergencyDelivered;
+  if (urgent && serverPriority && emergencyDelivered == false) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$coinLine。\n'
+          '【要確認】至急メールは主宛先には届きましたが、'
+          '緊急通知先（emergencyauraface@gmail.com）への送信に失敗した可能性があります。'
+          '迷惑メールもご確認ください。',
+        ),
+        backgroundColor: Colors.deepOrange.shade900,
+        duration: const Duration(seconds: 16),
+      ),
+    );
+    return;
+  }
+
   final extraUrgent = urgent && serverPriority
       ? ' Gmail 通知は至急用の分類で処理された応答です。'
       : '';
@@ -143,6 +164,8 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
   List<BridgeChatMessage> _messages = [];
   String? _chatId;
   String _userId = '';
+  String? _sessionUserId;
+  StreamSubscription<User?>? _authSubscription;
   String? _bridgeBaseUrl;
   bool _loading = true;
   bool _bootstrapped = false;
@@ -151,6 +174,9 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
   int _normalTickets = 0;
   int _urgentTickets = 0;
   bool _isSubscribed = false;
+
+  /// 送信券種（至急選択時は至急メール / 通常スレッド上なら新規至急スレッド）。
+  ConsultationSendTicketKind _sendTicketKindPreference = ConsultationSendTicketKind.normal;
 
   bool _sendingFirst = false;
 
@@ -174,10 +200,47 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     return _messages;
   }
 
+  List<BridgeChatMessage> get _currentThreadMessages => _visibleMessages;
+
   /// 相談スレッドあり、または送信後にメッセージ画面へ切り替え済み。
   bool get _showConsultationChat =>
       _hasConsultationThread &&
       (_visibleMessages.isNotEmpty || _preferConsultationThreadUi);
+
+  ConsultationAccessState get _accessSnapshot => ConsultationAccessState(
+        isSubscribed: _isSubscribed,
+        normalTickets: _normalTickets,
+        urgentTickets: _urgentTickets,
+      );
+
+  bool get _isUrgentThreadLocked =>
+      _showConsultationChat && _threadOpensWithPriority(_visibleMessages);
+
+  bool get _canChooseSendTicketKind {
+    final state = _accessSnapshot;
+    return ConsultationAccessService.canChooseNormalSend(state) &&
+        ConsultationAccessService.canChooseUrgentSend(state);
+  }
+
+  bool get _showSendTicketKindSelector =>
+      !_loading && _isSubscribed && !_isUrgentThreadLocked && _canChooseSendTicketKind;
+
+  bool get _showUrgentOnlyBadge =>
+      !_loading &&
+      _isSubscribed &&
+      !_isUrgentThreadLocked &&
+      !_canChooseSendTicketKind &&
+      ConsultationAccessService.canChooseUrgentSend(_accessSnapshot);
+
+  void _syncSendTicketKindPreference(ConsultationAccessState state) {
+    final canNormal = ConsultationAccessService.canChooseNormalSend(state);
+    final canUrgent = ConsultationAccessService.canChooseUrgentSend(state);
+    if (!canNormal && canUrgent) {
+      _sendTicketKindPreference = ConsultationSendTicketKind.urgent;
+    } else if (canNormal && !canUrgent) {
+      _sendTicketKindPreference = ConsultationSendTicketKind.normal;
+    }
+  }
 
   void _log(String message) => developer.log(message, name: 'DeveloperChat');
 
@@ -242,7 +305,35 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
         await _loadAccessState();
       },
     );
-    _bootstrap();
+    _authSubscription = FirebaseAuth.instance.authStateChanges().listen((_) {
+      unawaited(_onAuthStateChanged());
+    });
+  }
+
+  Future<void> _onAuthStateChanged() async {
+    if (!mounted) return;
+    final newUserId = await ConsultationIdentity.bridgeUserIdOrLegacy();
+    if (_sessionUserId != null && _sessionUserId == newUserId && _bootstrapped) {
+      return;
+    }
+    final switching = _sessionUserId != null && _sessionUserId != newUserId;
+    _sessionUserId = newUserId;
+    if (switching) {
+      _log('account session switch -> $newUserId');
+      _poll?.cancel();
+      _optimisticUserBubble = null;
+      setState(() {
+        _chatId = null;
+        _messages = [];
+        _preferConsultationThreadUi = false;
+        _loading = true;
+        _error = null;
+        _bootstrapped = false;
+      });
+    }
+    if (!_bootstrapped || switching) {
+      await _bootstrap();
+    }
   }
 
   @override
@@ -334,6 +425,10 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     bool pin = false,
     String? consultationType,
   }) async {
+    if (!ConsultationChatId.belongsToUser(chatId, _userId)) {
+      _log('ignore foreign chatId=$chatId user=$_userId');
+      return;
+    }
     final type = consultationType ??
         await DeveloperChatPref.getActiveConsultationType() ??
         ConsultationMailType.normal;
@@ -357,8 +452,12 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
   Future<void> _reloadActiveThread({bool scrollAfterLoad = true}) async {
     final pinned = await DeveloperChatPref.getPinnedChatId();
     final activeId = await DeveloperChatPref.getActiveChatId();
-    final targetId = (pinned != null && pinned.isNotEmpty) ? pinned : activeId;
+    var targetId = (pinned != null && pinned.isNotEmpty) ? pinned : activeId;
     if (targetId == null || targetId.isEmpty) return;
+    if (!ConsultationChatId.belongsToUser(targetId, _userId)) {
+      _log('reloadActiveThread skip foreign chatId=$targetId user=$_userId');
+      return;
+    }
     if (targetId != _chatId) {
       await _switchToChatId(targetId);
     }
@@ -391,6 +490,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     AppNavigation.refreshConsultationChat.removeListener(_onPushOpenRefresh);
     AppNavigation.scrollConsultationToLatest.removeListener(_onConsultationTabShown);
@@ -410,6 +510,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       _isSubscribed = state.isSubscribed;
       _normalTickets = state.normalTickets;
       _urgentTickets = state.urgentTickets;
+      _syncSendTicketKindPreference(state);
     });
   }
 
@@ -435,6 +536,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
         _isSubscribed = state.isSubscribed;
         _normalTickets = state.normalTickets;
         _urgentTickets = state.urgentTickets;
+        _syncSendTicketKindPreference(state);
       });
     }
     return state;
@@ -449,6 +551,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
         _isSubscribed = state.isSubscribed;
         _normalTickets = state.normalTickets;
         _urgentTickets = state.urgentTickets;
+        _syncSendTicketKindPreference(state);
       });
     }
     BillingLog.info(
@@ -627,6 +730,53 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
                     color: Colors.amber.shade100.withValues(alpha: 0.9),
                   ),
                 ),
+                if (_showSendTicketKindSelector) ...[
+                  const SizedBox(height: 8),
+                  SegmentedButton<ConsultationSendTicketKind>(
+                    key: const Key('consultation-send-kind-selector'),
+                    segments: [
+                      ButtonSegment(
+                        value: ConsultationSendTicketKind.normal,
+                        label: const Text('通常'),
+                        enabled: _normalTickets >= ConsultationTicketService.normalCostPerSend,
+                        icon: const Icon(Icons.mail_outline, size: 16),
+                      ),
+                      ButtonSegment(
+                        value: ConsultationSendTicketKind.urgent,
+                        label: const Text('至急'),
+                        enabled: _urgentTickets >= ConsultationTicketService.priorityCostPerSend,
+                        icon: const Icon(Icons.priority_high, size: 16),
+                      ),
+                    ],
+                    selected: {_sendTicketKindPreference},
+                    onSelectionChanged: (selected) {
+                      if (selected.isEmpty) return;
+                      setState(() => _sendTicketKindPreference = selected.first);
+                    },
+                  ),
+                  if (_sendTicketKindPreference == ConsultationSendTicketKind.urgent)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        _showConsultationChat && !_isUrgentThreadLocked
+                            ? '至急送信は emergencyauraface@gmail.com にも通知されます（同じ相談画面に表示）。'
+                            : '至急送信は emergencyauraface@gmail.com にも通知されます。',
+                        style: TextStyle(fontSize: 11, color: Colors.amber.shade200),
+                      ),
+                    ),
+                ] else if (_showUrgentOnlyBadge) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _showConsultationChat && !_isUrgentThreadLocked
+                        ? '至急券で送信（同じ相談画面・緊急メール宛にも通知）'
+                        : '至急券で送信（緊急メール宛にも通知）',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.amber.shade200,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
               ],
               Row(
@@ -672,6 +822,14 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     final seeds = await PillarInteractionSeedStore.loadForDisplay();
     await ConsultationActiveThreadResolver.applyLatestAsActive(bridgeUserId: _userId);
     _chatId = await DeveloperChatPref.getActiveChatId();
+    if (_chatId != null &&
+        _chatId!.isNotEmpty &&
+        !ConsultationChatId.belongsToUser(_chatId!, _userId)) {
+      _log('bootstrap clear foreign active chatId=$_chatId user=$_userId');
+      _chatId = null;
+    }
+    await DeveloperChatPref.clearLeadingThreadChatId();
+    _sessionUserId = _userId;
     if (!mounted) return;
     if (_chatId == null || _chatId!.isEmpty) {
       setState(() {
@@ -778,9 +936,20 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       }
     }
     final local = await BridgeThreadLocalStore.load(cid);
-    final res = await _service.getThread(chatId: cid);
+    List<BridgeChatMessage> sorted;
+    ThreadResponse res;
+    try {
+      sorted = await ConsultationUnifiedThread.loadUnifiedMessages(
+        service: _service,
+        displayChatId: cid,
+      );
+      res = ThreadResponse(success: true, chatId: cid, messages: sorted);
+    } catch (e) {
+      res = await _service.getThread(chatId: cid);
+      sorted = BridgeThreadLocalStore.merge(local, res.success ? res.messages : const []);
+    }
     if (!mounted) return;
-    if (!res.success) {
+    if (!res.success && sorted.isEmpty) {
       final offline = BridgeThreadLocalStore.merge(local, []);
       await _loadAccessState();
       if (!mounted) return;
@@ -800,7 +969,6 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       });
       return;
     }
-    final sorted = BridgeThreadLocalStore.merge(local, res.messages);
     await BridgeThreadLocalStore.save(cid, sorted);
     await _maybeShowRetentionNotice(res);
     final maxDev = _maxDevCreatedAt(sorted);
@@ -848,9 +1016,47 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     required String consultationType,
     required String bridgeUrl,
     int? messageId,
+    String? displayChatId,
   }) async {
-    _chatId = chatId;
     _bridgeBaseUrl = bridgeUrl;
+    final appendToDisplayOnly = displayChatId != null &&
+        displayChatId.isNotEmpty &&
+        displayChatId != chatId;
+
+    if (appendToDisplayOnly) {
+      await BridgeThreadLocalStore.appendUserMessage(
+        chatId: chatId,
+        text: bodyText,
+        consultationType: consultationType,
+        messageId: messageId,
+      );
+      await ConsultationUnifiedThread.linkMailBridgeChatId(
+        displayChatId: displayChatId,
+        mailBridgeChatId: chatId,
+      );
+      _setOptimisticUserMessage(text: bodyText, consultationType: consultationType);
+      List<BridgeChatMessage> unified;
+      try {
+        unified = await ConsultationUnifiedThread.loadUnifiedMessages(
+          service: _service,
+          displayChatId: displayChatId,
+        );
+      } catch (_) {
+        unified = await BridgeThreadLocalStore.load(displayChatId);
+      }
+      _clearOptimisticIfMerged(unified);
+      if (mounted) {
+        setState(() {
+          _preferConsultationThreadUi = true;
+          _loading = false;
+          if (unified.isNotEmpty) _messages = unified;
+        });
+        if (_visibleMessages.isNotEmpty) _scrollToBottom(animated: false);
+      }
+      return;
+    }
+
+    _chatId = chatId;
     _setOptimisticUserMessage(text: bodyText, consultationType: consultationType);
     await BridgeThreadLocalStore.appendUserMessage(
       chatId: chatId,
@@ -1032,30 +1238,37 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     if (_sendingFirst) return;
     if (kDebugMode) E2EDiagnostics.sendPressed++;
 
-    BillingLog.info(
-      'consultationSendPressed thread=$_showConsultationChat '
-      'normal=$_normalTickets urgent=$_urgentTickets',
-    );
-
     final state = await _loadLocalAccessState();
     if (!mounted) return;
+
+    BillingLog.info(
+      'consultationSendPressed thread=$_showConsultationChat '
+      'normal=${state.normalTickets} urgent=${state.urgentTickets} '
+      'pref=$_sendTicketKindPreference urgentThreadLocked=$_isUrgentThreadLocked',
+    );
+
     if (!state.isSubscribed) {
       if (kDebugMode) E2EDiagnostics.subscriptionPrompt++;
       await _promptSubscriptionRequiredAfterSend();
       return;
     }
 
-    ConsultationSendTicketKind? ticketKind;
-    if (_showConsultationChat) {
-      final mailType = await _followUpConsultationTypeFor(_visibleMessages);
-      ticketKind = ConsultationAccessService.resolveFollowUpTicketKind(state, mailType);
-    } else {
-      ticketKind = ConsultationAccessService.resolveSendTicketKind(state);
-    }
+    final route = ConsultationSendRouting.resolve(
+      showConsultationChat: _showConsultationChat,
+      threadOpensWithPriority: _isUrgentThreadLocked,
+      preference: _sendTicketKindPreference,
+      state: state,
+    );
+    final ticketKind = route?.ticketKind;
 
-    if (ticketKind == null) {
+    if (ticketKind == null || route == null) {
       if (kDebugMode) E2EDiagnostics.insufficientTickets++;
-      BillingLog.info('insufficientTickets: no ticketKind -> store');
+      BillingLog.info(
+        'insufficientTickets: no ticketKind -> store '
+        '(subscribed=${state.isSubscribed} normal=${state.normalTickets} '
+        'urgent=${state.urgentTickets} pref=$_sendTicketKindPreference '
+        'urgentLocked=$_isUrgentThreadLocked)',
+      );
       await _navigateToStoreForTicketPurchase(accessState: state);
       return;
     }
@@ -1083,13 +1296,19 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       return;
     }
 
-    if (_showConsultationChat) {
-      await _sendFollowUp(ticketKind: ticketKind);
-    } else {
+    _log(
+      'send route firstApi=${route.useFirstConsultationApi} urgent=${route.urgent} '
+      'kind=$ticketKind chatId=$_chatId',
+    );
+
+    if (route.useFirstConsultationApi) {
       await _sendFirstConsultation(
-        urgent: ticketKind == ConsultationSendTicketKind.urgent,
+        urgent: route.urgent,
         ticketKind: ticketKind,
+        startedFromNormalThread: _showConsultationChat && !_isUrgentThreadLocked,
       );
+    } else {
+      await _sendFollowUp(ticketKind: ticketKind);
     }
   }
 
@@ -1138,14 +1357,15 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
   Future<void> _sendFirstConsultation({
     required bool urgent,
     required ConsultationSendTicketKind ticketKind,
+    bool startedFromNormalThread = false,
   }) async {
     if (_input.text.trim().isEmpty) return;
     if (_sendingFirst) return;
     final access = await _syncAccessState();
     if (!access.isSubscribed) return;
 
-    final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
-    if (fbUser == null) return;
+    final userId = await ConsultationIdentity.resolveSendUserId(context);
+    if (userId == null) return;
 
     final useFirestore = CloudService.isAvailable;
 
@@ -1160,7 +1380,6 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     }
 
     final prefs = await SharedPreferences.getInstance();
-    final userId = fbUser.uid;
     await prefs.setString('user_id', userId);
     final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
     final bridgeUrl = AuraFaceChatMailService.consultationSendBaseUrl(savedUrl);
@@ -1168,12 +1387,20 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
     var mailSuccess = false;
     final String bridgeForCatch = bridgeUrl;
-    final chatId = 'consultation_${userId}_${DateTime.now().millisecondsSinceEpoch}';
+    final mailChatId = 'consultation_${userId}_${DateTime.now().millisecondsSinceEpoch}';
+    final displayChatId =
+        startedFromNormalThread && urgent && _chatId != null && _chatId!.isNotEmpty
+            ? _chatId!
+            : null;
     final mailCt = ConsultationMailNewSend.consultationTypeForPref(urgent: urgent);
     final accessState = await ConsultationAccessService.loadState();
     final subscribed = accessState.isSubscribed;
     final sideloadTest = await _isSideloadTestSubscriptionActive();
-    _log('sendFirstConsultation subscribed=$subscribed sideloadTest=$sideloadTest chatId=$chatId');
+    _log(
+      'sendFirstConsultation subscribed=$subscribed sideloadTest=$sideloadTest '
+      'mailChatId=$mailChatId displayChatId=$displayChatId urgent=$urgent '
+      'fromNormalThread=$startedFromNormalThread',
+    );
 
     try {
       final mailService = AuraFaceChatMailService(baseUrl: bridgeUrl);
@@ -1181,7 +1408,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       final res = await ConsultationMailNewSend.send(
         mailService: mailService,
         userId: userId,
-        chatId: chatId,
+        chatId: mailChatId,
         message: bodyText,
         sendSource: ConsultationSendSource.consultationPage,
         urgent: urgent,
@@ -1192,20 +1419,32 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       );
       if (res.success) {
         await _establishLocalConsultationThread(
-          chatId: chatId,
+          chatId: mailChatId,
           bodyText: bodyText,
           consultationType: mailCt,
           bridgeUrl: bridgeUrl,
           messageId: res.messageId,
+          displayChatId: displayChatId,
         );
         mailSuccess = true;
+        if (mounted) {
+          _showMailSentFeedback(
+            context,
+            useFirestore: useFirestore,
+            coinLine: urgent ? '至急券を1枚使用しました' : '通常券を1枚使用しました',
+            urgent: urgent,
+            mailSent: res.mailSent ?? true,
+            bridge: res,
+          );
+        }
         unawaited(PushNotificationService.instance.syncTokenNow());
       } else if (subscribed) {
         await _establishLocalConsultationThread(
-          chatId: chatId,
+          chatId: mailChatId,
           bodyText: bodyText,
           consultationType: mailCt,
           bridgeUrl: bridgeUrl,
+          displayChatId: displayChatId,
         );
         mailSuccess = true;
         _log('sendFirstConsultation: mail failed, subscribed local thread saved');
@@ -1243,10 +1482,11 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       debugPrint('[DeveloperChat] $st');
       if (subscribed) {
         await _establishLocalConsultationThread(
-          chatId: chatId,
+          chatId: mailChatId,
           bodyText: bodyText,
           consultationType: mailCt,
           bridgeUrl: bridgeUrl,
+          displayChatId: displayChatId,
         );
         mailSuccess = true;
         _log('sendFirstConsultation: exception, subscribed local thread saved');
@@ -1276,6 +1516,15 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
 
     _input.clear();
     if (mailSuccess) {
+      if (startedFromNormalThread && urgent && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('至急相談を送信しました。通常の相談と同じ画面に表示されます。'),
+            backgroundColor: Color(0xFF92400E),
+            duration: Duration(seconds: 5),
+          ),
+        );
+      }
       await _completeConsultationSendAndShowMessageScreen(ticketKind: ticketKind);
       return;
     }
@@ -1288,25 +1537,47 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     final access = await _syncAccessState();
     if (!access.isSubscribed) return;
 
-    final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
-    if (fbUser == null) return;
+    final userId = await ConsultationIdentity.resolveSendUserId(context);
+    if (userId == null) return;
 
     setState(() => _loading = true);
     try {
-      final mailConsultationType = await _followUpConsultationTypeFor(_visibleMessages);
-      _setOptimisticUserMessage(text: text, consultationType: mailConsultationType);
+      final mailConsultationType = ticketKind == ConsultationSendTicketKind.urgent
+          ? ConsultationMailType.priorityGuidance
+          : ConsultationMailType.normal;
+      final mailBody = ticketKind == ConsultationSendTicketKind.urgent
+          ? AuraFaceChatMailService.applyNewUrgentConsultationPrefix(
+              urgent: true,
+              message: text,
+            )
+          : text;
+      _setOptimisticUserMessage(text: mailBody, consultationType: mailConsultationType);
       if (mounted) {
         setState(() => _preferConsultationThreadUi = true);
       }
-      final res = await _service.send(
-        userId: fbUser.uid,
-        chatId: _chatId!,
-        message: text,
-        sendSource: ConsultationSendSource.developerChatFollowUp,
-        userName: '占い相談ユーザー',
-        userEmail: '',
-        consultationType: mailConsultationType,
-      );
+      final SendChatResponse res;
+      if (ticketKind == ConsultationSendTicketKind.urgent) {
+        res = await ConsultationMailNewSend.send(
+          mailService: _service,
+          userId: userId,
+          chatId: _chatId!,
+          message: mailBody,
+          sendSource: ConsultationSendSource.developerChatFollowUp,
+          urgent: true,
+          userName: '占い相談ユーザー',
+          userEmail: '',
+        );
+      } else {
+        res = await _service.send(
+          userId: userId,
+          chatId: _chatId!,
+          message: text,
+          sendSource: ConsultationSendSource.developerChatFollowUp,
+          userName: '占い相談ユーザー',
+          userEmail: '',
+          consultationType: mailConsultationType,
+        );
+      }
       if (!mounted) return;
       final subscribed = (await ConsultationAccessService.loadState()).isSubscribed;
 
@@ -1353,6 +1624,18 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       await persistFollowUpLocally(messageId: res.messageId);
       _input.clear();
       if (mounted) setState(() => _loading = false);
+      if (res.success && mounted) {
+        _showMailSentFeedback(
+          context,
+          useFirestore: CloudService.isAvailable,
+          coinLine: ticketKind == ConsultationSendTicketKind.urgent
+              ? '至急券を1枚使用しました'
+              : '通常券を1枚使用しました',
+          urgent: ticketKind == ConsultationSendTicketKind.urgent,
+          mailSent: res.mailSent ?? true,
+          bridge: res,
+        );
+      }
       await _completeConsultationSendAndShowMessageScreen(ticketKind: ticketKind);
     } catch (e) {
       if (mounted) {
@@ -1396,31 +1679,6 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
                   child: const Text('再試行'),
                 ),
               ],
-            ),
-          ),
-        if (_showConsultationChat &&
-            !_loading &&
-            _visibleMessages.isNotEmpty &&
-            _threadOpensWithPriority(_visibleMessages))
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade900.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber.shade700),
-              ),
-              child: Text(
-                'このスレッドは「至急」で始まっています。'
-                '追記メールも至急扱いで届きます（サーバー保存の種別に従います）。',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.amber.shade100,
-                ),
-              ),
             ),
           ),
         Expanded(child: _buildThreadScrollBody()),

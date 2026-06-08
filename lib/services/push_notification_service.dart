@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
 import 'package:kami_face_oracle/services/notification_launch_router.dart';
 import 'package:kami_face_oracle/push/firebase_messaging_background.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
@@ -33,6 +34,9 @@ class PushNotificationService {
   PushNotificationService._();
 
   static final PushNotificationService instance = PushNotificationService._();
+
+  /// integration_test 中は FCM 許可ダイアログを出さない。
+  static bool suppressForIntegrationTest = false;
 
   static const String _channelId = 'auraface_dev_reply';
   static const String _channelName = '開発者からの返信';
@@ -179,6 +183,9 @@ class PushNotificationService {
   }
 
   Future<void> _requestFcmPermission() async {
+    if (suppressForIntegrationTest || IntegrationTestFlags.bypassConsultationFirebaseAuth) {
+      return;
+    }
     if (!CloudService.isFirebaseAppReady) return;
     final messaging = FirebaseMessaging.instance;
     final settings = await messaging.requestPermission(

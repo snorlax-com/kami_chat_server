@@ -5,6 +5,7 @@ import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart
 import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 import 'package:kami_face_oracle/services/sideload_billing_service.dart';
 import 'package:kami_face_oracle/services/subscription_bonus_service.dart';
+import 'package:kami_face_oracle/services/tutorial_subscribe_retake_service.dart';
 
 /// Google Play 未連携時のアプリ内購入（debug / sideload テスト用）。
 class LocalTicketStoreService {
@@ -22,10 +23,15 @@ class LocalTicketStoreService {
 
   static Future<int> purchaseSubscription({bool sideloadTest = false}) async {
     if (!StoreBillingConfig.allowAppStoreWhenPlayMissing && !sideloadTest) return 0;
+    final wasActive = await ConsultationSubscriptionService.isActive();
     await ConsultationSubscriptionService.setActive(true);
     if (sideloadTest) {
       await SideloadBillingService.markSideloadTestPurchase();
     }
-    return SubscriptionBonusService.grantFirstBonusIfEligible();
+    final bonus = await SubscriptionBonusService.grantFirstBonusIfEligible();
+    await TutorialSubscribeRetakeService.onSubscriptionActivated(
+      wasSubscribedBefore: wasActive,
+    );
+    return bonus;
   }
 }

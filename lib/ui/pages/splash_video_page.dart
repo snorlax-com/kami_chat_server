@@ -138,6 +138,7 @@ class _SplashVideoPageState extends State<SplashVideoPage> {
     _controller?.removeListener(_maybeComplete);
     await DeferredStartup.awaitReady(timeout: const Duration(seconds: 8));
     if (!mounted) return;
+    debugPrint('[StartupFlow] splash complete → age/policy gate');
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(builder: (_) => widget.next),
     );

@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/widgets.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
 import 'package:kami_face_oracle/app_navigation.dart';
+import 'package:kami_face_oracle/services/tutorial_subscribe_retake_service.dart';
 import 'package:kami_face_oracle/config/consultation_subscription_config.dart';
 import 'package:kami_face_oracle/config/play_billing_products.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
@@ -176,22 +176,53 @@ class IAPService {
 
   bool get canSubscribeViaPlay => _isAvailable && subscriptionProduct != null;
 
+  bool isPackInCatalog(ConsultationTicketPack pack) => productForPack(pack) != null;
+
+  /// Play 上で有効なサブスクがあるか（queryPastPurchases）。
+  Future<bool> hasActiveSubscriptionOnPlay() async {
+    if (!_isAvailable) return false;
+    if (Platform.isAndroid) {
+      final android = _iap.getPlatformAddition<InAppPurchaseAndroidPlatformAddition>();
+      final response = await android.queryPastPurchases();
+      if (response.error != null) return false;
+      for (final purchase in response.pastPurchases) {
+        if (!PlayBillingProducts.isSubscriptionProduct(purchase.productID)) continue;
+        if (_isActivePurchaseStatus(purchase.status)) return true;
+      }
+      return false;
+    }
+    return ConsultationSubscriptionService.isActive();
+  }
+
   Future<StorePurchaseOutcome> purchaseConsumable(ConsultationTicketPack pack) async {
-    final product = productForPack(pack);
-    if (product == null || !_isAvailable) return const StorePurchaseUnavailable();
+    if (!_isAvailable) return const StorePurchaseUnavailable();
+    var product = productForPack(pack);
+    if (product == null) {
+      await loadProducts();
+      product = productForPack(pack);
+    }
+    if (product == null) return const StorePurchaseUnavailable();
     final started = await _buyConsumable(product);
-    BillingLog.purchase('buyConsumable ${pack.id} started=$started');
+    BillingLog.purchase('launchBillingFlow INAPP ${pack.id} started=$started');
     return started
         ? StorePurchasePlayLaunched(pack.id)
         : StorePurchasePlayLaunchFailed(pack.id);
   }
 
   Future<StorePurchaseOutcome> subscribeViaPlay() async {
-    final product = subscriptionProduct;
-    if (product == null || !_isAvailable) return const StorePurchaseUnavailable();
+    if (!_isAvailable) return const StorePurchaseUnavailable();
+    if (await hasActiveSubscriptionOnPlay()) {
+      return const StorePurchaseAlreadySubscribed();
+    }
+    var product = subscriptionProduct;
+    if (product == null) {
+      await loadProducts();
+      product = subscriptionProduct;
+    }
+    if (product == null) return const StorePurchaseUnavailable();
     final started = await _buySubscription(product);
     BillingLog.purchase(
-      'buySubscription ${ConsultationSubscriptionConfig.productId} started=$started',
+      'launchBillingFlow SUBS ${ConsultationSubscriptionConfig.productId} started=$started',
     );
     return started
         ? StorePurchasePlayLaunched(ConsultationSubscriptionConfig.productId)
@@ -311,6 +342,9 @@ class IAPService {
     if (!wasActive && active) {
       final bonus = await SubscriptionBonusService.grantFirstBonusIfEligible();
       onSubscriptionUpdated?.call(true, bonusTickets: bonus);
+      await TutorialSubscribeRetakeService.onSubscriptionActivated(
+        wasSubscribedBefore: wasActive,
+      );
     } else if (wasActive != active) {
       onSubscriptionUpdated?.call(active, bonusTickets: 0);
       AppNavigation.notifyStoreAccessChanged();
@@ -357,9 +391,13 @@ class IAPService {
         await _acknowledgeIfNeeded(purchase);
 
         if (PlayBillingProducts.isSubscriptionProduct(productId)) {
+          final wasActive = await ConsultationSubscriptionService.isActive();
           await ConsultationSubscriptionService.setActive(true);
           _playSubscriptionVerified = true;
           onSubscriptionUpdated?.call(true, bonusTickets: result.bonusTickets);
+          await TutorialSubscribeRetakeService.onSubscriptionActivated(
+            wasSubscribedBefore: wasActive,
+          );
         }
         if (result.ticketsGranted > 0) {
           onTicketsGranted?.call(
@@ -368,7 +406,7 @@ class IAPService {
             isUrgent: result.isUrgent,
           );
           BillingLog.info('iap ticketsGranted backup return');
-          unawaited(AppNavigation.completeTicketPackPurchaseFromStore());
+          AppNavigation.returnToConsultationAfterStorePurchase();
         }
       }
     }
@@ -403,8 +441,23 @@ class IAPService {
     final timeMs = _extractPurchaseTimeMs(purchase);
     final isSub = PlayBillingProducts.isSubscriptionProduct(productId);
 
+    if (token == null || token.isEmpty) {
+      BillingLog.warn('grant skipped: no purchaseToken product=$productId');
+      return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
+    }
+
+    final verified = await BillingServerSyncService.verifyPurchaseOnServer(
+      productId: PlayBillingProducts.playStoreProductId(productId),
+      purchaseToken: token,
+      isSubscription: isSub,
+    );
+    if (!verified) {
+      BillingLog.warn('grant skipped: server verify failed product=$productId');
+      return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
+    }
+
     unawaited(
-      BillingServerSyncService.syncPurchase(
+      BillingServerSyncService.syncPurchaseAudit(
         productId: productId,
         purchaseId: purchaseId,
         purchaseToken: token,
@@ -493,4 +546,8 @@ final class StorePurchasePlayLaunchFailed extends StorePurchaseOutcome {
 
 final class StorePurchaseUnavailable extends StorePurchaseOutcome {
   const StorePurchaseUnavailable();
+}
+
+final class StorePurchaseAlreadySubscribed extends StorePurchaseOutcome {
+  const StorePurchaseAlreadySubscribed();
 }

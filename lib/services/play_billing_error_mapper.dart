@@ -4,6 +4,15 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 class PlayBillingErrorMapper {
   PlayBillingErrorMapper._();
 
+  static const String playConnectionFailed = 'Google Playに接続できません';
+
+  static String billingUnavailableMessage({bool catalogMissing = false}) {
+    if (catalogMissing) {
+      return '$playConnectionFailed。商品情報を取得できていません。Play Console の登録と内部テストを確認してください。';
+    }
+    return '$playConnectionFailed。Play ストアアプリとネットワークを確認し、内部テスト版からインストールしてください。';
+  }
+
   static String userMessage(Object? error, {String? productId}) {
     final code = _errorCode(error);
     final detail = error?.toString() ?? '';
@@ -22,13 +31,13 @@ class PlayBillingErrorMapper {
       case 'SERVICE_UNAVAILABLE':
       case 'serviceDisconnected':
       case 'SERVICE_DISCONNECTED':
-        return 'Google Play 課金サービスに接続できません。Play ストアアプリを開き、再試行してください。';
+        return playConnectionFailed;
       case 'networkError':
       case 'NETWORK_ERROR':
         return 'ネットワークエラーです。通信環境を確認して再試行してください。';
       case 'billingUnavailable':
       case 'BILLING_UNAVAILABLE':
-        return 'この端末では Google Play 課金が利用できません。';
+        return playConnectionFailed;
       case 'developerError':
       case 'DEVELOPER_ERROR':
         return 'アプリの課金設定に問題があります。開発者へお問い合わせください。';

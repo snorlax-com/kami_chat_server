@@ -47,6 +47,29 @@ class ConsultationAccessService {
     return null;
   }
 
+  /// 新規相談の券種（画面で選んだ種別を優先。不足時のみ自動フォールバック）。
+  static ConsultationSendTicketKind? resolveFirstSendTicketKind(
+    ConsultationAccessState state, {
+    required ConsultationSendTicketKind preference,
+  }) {
+    if (!state.isSubscribed) return null;
+    if (preference == ConsultationSendTicketKind.urgent &&
+        state.urgentTickets >= ConsultationTicketService.priorityCostPerSend) {
+      return ConsultationSendTicketKind.urgent;
+    }
+    if (preference == ConsultationSendTicketKind.normal &&
+        state.normalTickets >= ConsultationTicketService.normalCostPerSend) {
+      return ConsultationSendTicketKind.normal;
+    }
+    return resolveSendTicketKind(state);
+  }
+
+  static bool canChooseNormalSend(ConsultationAccessState state) =>
+      state.normalTickets >= ConsultationTicketService.normalCostPerSend;
+
+  static bool canChooseUrgentSend(ConsultationAccessState state) =>
+      state.urgentTickets >= ConsultationTicketService.priorityCostPerSend;
+
   /// スレッド追記時（至急スレッドは至急券のみ）。
   static ConsultationSendTicketKind? resolveFollowUpTicketKind(
     ConsultationAccessState state,

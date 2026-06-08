@@ -1,22 +1,30 @@
 # Google Play Billing テスト環境セットアップ
 
+**Play Console の画面操作手順（商品作成・内部テスト・API 権限）は [PLAY_CONSOLE_SETUP.md](./PLAY_CONSOLE_SETUP.md) を参照。**
+
+準備情報の表示:
+
+```bash
+./scripts/play_console_prepare.sh
+```
+
 ## 商品 ID（アプリ内定数）
 
 | 種別 | 商品 ID | 価格目安 |
 |------|---------|----------|
-| 定期購入 | `subscription_monthly_500` | ¥500/月 |
-| 消耗型 | `ticket_normal_600` | ¥600 |
-| 消耗型 | `ticket_urgent_10000` | ¥10,000 |
+| 定期購入 | `monthly_subscription_500` | ¥500/月 |
+| 消耗型 | `normal_ticket_600` | ¥600 |
+| 消耗型 | `urgent_ticket_10000` | ¥10,000 |
 
 定義: `lib/config/play_billing_products.dart`
 
-旧 ID（`monthly_subscription_500` 等）は移行期間のみクエリに含めます。Play Console は **正規 ID** で登録してください。
+旧 ID（`subscription_monthly_500` 等）は移行期間のみクエリに含めます。Play Console は **正規 ID** で登録してください。
 
 ## Play Console 設定
 
 1. **アプリ** → **収益化** → **商品**
-2. 定期購入: `subscription_monthly_500`（基本プラン 1 件）
-3. アプリ内商品（消耗型）: `ticket_normal_600`, `ticket_urgent_10000`
+2. 定期購入: `monthly_subscription_500`（基本プラン 1 件）
+3. アプリ内商品（消耗型）: `normal_ticket_600`, `urgent_ticket_10000`
 4. **ライセンステスト** にテスターの Gmail を追加
 5. **内部テスト** トラックに AAB/APK をアップロード
 6. テスターを **メールリスト** に追加し、オプトイン URL から参加

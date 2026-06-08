@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import 'package:kami_face_oracle/core/storage.dart';
-import 'package:kami_face_oracle/ui/pages/tutorial_intro_page.dart';
 import 'package:kami_face_oracle/core/deities.dart';
 import 'package:kami_face_oracle/core/deity.dart';
 import 'package:kami_face_oracle/ui/pages/legal_document_page.dart';
@@ -377,22 +376,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     ),
                   ],
                   const SizedBox(height: 16),
-                  // チュートリアル（E2E: data-testid 代わりに Key）
-                  Semantics(
-                    button: true,
-                    label: 'チュートリアルを開く',
-                    child: OutlinedButton.icon(
-                      key: const Key('e2e-tutorial'),
-                      onPressed: () =>
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const TutorialIntroPage())),
-                      icon: const Icon(Icons.school),
-                      label: const Text('チュートリアル'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: Colors.white.withOpacity(0.3), width: 1.5),
-                      ),
-                    ),
-                  ),
                   if (_hasCachedTutorialDiagnosis) ...[
                     const SizedBox(height: 12),
                     Semantics(

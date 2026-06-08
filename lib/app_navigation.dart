@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_store_return_prefs.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
+import 'package:kami_face_oracle/services/tutorial_diagnosis_local_store.dart';
 import 'package:kami_face_oracle/ui/pages/main_tab_shell.dart';
+import 'package:kami_face_oracle/ui/pages/tutorial_intro_page.dart';
 
 /// プッシュ通知タップ等から占い相談タブへ遷移するためのグローバル Navigator。
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
@@ -143,16 +145,18 @@ class AppNavigation {
       refreshStoreTab.value++;
     }
 
-    if (hadCallback) {
-      navigate();
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) => navigate());
-    }
-
-    BillingLog.info(
-      'openStoreForTicketsImmediate callback=$hadCallback '
-      'notifier=${requestOpenStoreForTickets.value}',
-    );
+    unawaited(() async {
+      await ConsultationTicketStoreReturnPrefs.setPending(true);
+      if (hadCallback) {
+        navigate();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) => navigate());
+      }
+      BillingLog.info(
+        'openStoreForTicketsImmediate callback=$hadCallback '
+        'notifier=${requestOpenStoreForTickets.value}',
+      );
+    }());
   }
 
   /// 下部ナビのタブを切り替える（[MainTabShell] 表示中のみ有効）。
@@ -199,7 +203,10 @@ class AppNavigation {
 
   /// 券パック購入完了時（テスト購入・Play 共通）に占い相談へ戻す。
   static Future<void> completeTicketPackPurchaseFromStore() async {
-    final shouldReturn = await shouldReturnToConsultationAfterTicketStorePurchaseAsync();
+    var shouldReturn = shouldReturnToConsultationAfterTicketStorePurchase;
+    if (!shouldReturn) {
+      shouldReturn = await ConsultationTicketStoreReturnPrefs.isPending();
+    }
     if (!shouldReturn) {
       BillingLog.info('completeTicketPackPurchaseFromStore: skip (not from consultation)');
       return;
@@ -244,7 +251,10 @@ class AppNavigation {
   }
 
   static void _tryReturnToConsultationAfterStorePurchase() {
-    if (!pendingReturnToConsultationAfterTicketStore) return;
+    if (!pendingReturnToConsultationAfterTicketStore &&
+        !storeOpenedForTicketPurchase.value) {
+      return;
+    }
 
     final direct = _setMainTabIndexDirect;
     final immediate = _switchToConsultationImmediate;
@@ -255,13 +265,17 @@ class AppNavigation {
     );
 
     suppressCancelPendingWhenOpeningConsultation = true;
+    var navigated = false;
     try {
-      if (direct != null) {
-        direct(tabConsultation);
-      } else if (immediate != null) {
+      if (immediate != null) {
         immediate();
+        navigated = true;
+      } else if (direct != null) {
+        direct(tabConsultation);
+        navigated = true;
       } else if (hasSwitcher) {
         _switchMainTab!(tabConsultation);
+        navigated = true;
       } else if (_returnToConsultationAttempt < 40) {
         _returnToConsultationAttempt++;
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -270,15 +284,21 @@ class AppNavigation {
         return;
       } else {
         BillingLog.warn('returnToConsultationAfterStorePurchase: no handlers after retries');
+        requestReturnToConsultationAfterPurchase.value++;
         return;
       }
     } finally {
       suppressCancelPendingWhenOpeningConsultation = false;
     }
 
-    unawaited(_clearAllReturnPendingFlags());
-    unawaited(restoreConsultationDraftNow());
-    scrollConsultationToLatest.value++;
+    if (!navigated) return;
+
+    requestReturnToConsultationAfterPurchase.value++;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_clearAllReturnPendingFlags());
+      unawaited(restoreConsultationDraftNow());
+      scrollConsultationToLatest.value++;
+    });
   }
 
   /// ストアタブへ。[forTicketPurchase] は占い相談の券不足時（加入済みならロックを回避）。
@@ -365,5 +385,48 @@ class AppNavigation {
     }
 
     debugPrint('[AppNavigation] openConsultationChat gave up chatId=$cid');
+  }
+
+  /// サブスク加入直後など、グローバル Navigator から性格診断チュートリアルを開く。
+  static void launchTutorialPersonalityDiagnosis({String? message}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(pushTutorialPersonalityDiagnosisWhenReady(message: message));
+    });
+  }
+
+  /// Navigator の準備を待ってチュートリアルを push する。成功時 true。
+  /// [force] が false のとき、チュートリアル診断を既に消費済みなら起動しない。
+  static Future<bool> pushTutorialPersonalityDiagnosisWhenReady({
+    String? message,
+    bool force = false,
+  }) async {
+    if (!force) {
+      final skip = await TutorialDiagnosisLocalStore.shouldSkipAutoTutorialLaunch();
+      if (skip) {
+        debugPrint('[AppNavigation] skip tutorial: diagnosis chance already used');
+        return false;
+      }
+    }
+    for (var attempt = 0; attempt < 120; attempt++) {
+      final nav = appNavigatorKey.currentState;
+      if (nav != null && nav.mounted) {
+        final ctx = nav.context;
+        if (message != null && message.isNotEmpty && ctx.mounted) {
+          ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+        }
+        await nav.push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => const TutorialIntroPage(key: Key('e2e-tutorial')),
+          ),
+        );
+        debugPrint('[AppNavigation] launchTutorialPersonalityDiagnosis ok attempt=$attempt');
+        return true;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    debugPrint('[AppNavigation] launchTutorialPersonalityDiagnosis: navigator not ready');
+    return false;
   }
 }

@@ -48,7 +48,7 @@ class ConsultationTicketPacksService {
       id: PlayBillingProducts.ticketUrgent10000,
       name: '至急質問券 1枚',
       tickets: 1,
-      description: '至急の占い相談を1回分',
+      description: '至急相談を1回分（営業時間内は原則2時間以内に返信）',
       ticketType: ConsultationTicketProductType.urgent,
       referencePriceYen: 10000,
     ),

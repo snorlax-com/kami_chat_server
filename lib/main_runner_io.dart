@@ -8,6 +8,7 @@ import 'package:kami_face_oracle/app_widgets.dart';
 import 'package:kami_face_oracle/bootstrap/deferred_startup.dart';
 import 'package:kami_face_oracle/bootstrap/opening_video_preload.dart';
 import 'package:kami_face_oracle/core/e2e.dart';
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
 import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/services/notification_launch_router.dart';
@@ -20,19 +21,12 @@ import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/core/personality_mapping_table.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-bool get _integrationTestConsultation =>
-    bool.fromEnvironment('INTEGRATION_TEST_CONSULTATION', defaultValue: false);
+bool get _integrationTestConsultation => IntegrationTestFlags.bypassConsultationFirebaseAuth;
 
-/// スプラッシュ動画を出さない E2E 経路では、従来どおり初期化完了まで待ってから [runApp] する。
-bool _skipOpeningSplashAwaitDeferredFirst() {
-  if (!E2E.isEnabled) return false;
-  if (_integrationTestConsultation) return true;
-  try {
-    final qp = Uri.base.queryParameters;
-    return qp['route'] == 'camera' || qp['camera'] == '1';
-  } catch (_) {
-    return false;
-  }
+/// 占い相談の統合テストだけ [runApp] 前に初期化完了を待つ（メール送信に Firebase 等が必要）。
+/// カメラ E2E は疑似撮影のみなので待たず UI を先に出し、初期化はバックグラウンド継続。
+bool _awaitDeferredInitBeforeRunApp() {
+  return E2E.isEnabled && _integrationTestConsultation;
 }
 
 Future<void> _runDeferredInitIo() async {
@@ -49,6 +43,8 @@ Future<void> _runDeferredInitIo() async {
 
 Future<void> runAppAsync() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // integration_test の prefs フラグは dart-define より先に読む
+  await IntegrationTestFlags.loadRuntimeFlags();
   await lockPortraitOrientation();
 
   try {
@@ -67,7 +63,7 @@ Future<void> runAppAsync() async {
   OpeningVideoPreload.start();
   DeferredStartup.begin(_runDeferredInitIo);
 
-  if (_skipOpeningSplashAwaitDeferredFirst()) {
+  if (_awaitDeferredInitBeforeRunApp()) {
     await DeferredStartup.awaitReady();
   }
 

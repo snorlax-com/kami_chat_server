@@ -26,7 +26,7 @@ class SubscriptionBonusService {
 
     await ConsultationTicketService.addNormalTickets(tickets);
     await prefs.setBool(_kBonusGranted, true);
-    await BillingServerSyncService.syncPurchase(
+    await BillingServerSyncService.syncPurchaseAudit(
       productId: PlayBillingProducts.subscriptionMonthly500,
       purchaseId: 'first_bonus_${DateTime.now().millisecondsSinceEpoch}',
       isSubscription: true,

@@ -2,6 +2,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/services/bridge_thread_local_store.dart';
+import 'package:kami_face_oracle/services/consultation_chat_id.dart';
+import 'package:kami_face_oracle/services/consultation_unified_thread.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/services/diagnosis_api_service.dart';
 
@@ -10,18 +12,10 @@ class ConsultationActiveThreadResolver {
   ConsultationActiveThreadResolver._();
 
   /// `consultation_{userId}_{ms}` / `consultation_new_{userId}_{ms}` の末尾タイムスタンプ。
-  static int? timestampFromChatId(String chatId) {
-    final m = RegExp(r'_(\d{13,})$').firstMatch(chatId.trim());
-    if (m == null) return null;
-    return int.tryParse(m.group(1)!);
-  }
+  static int? timestampFromChatId(String chatId) => ConsultationChatId.timestampMs(chatId);
 
-  static bool chatIdBelongsToUser(String chatId, String bridgeUserId) {
-    if (!chatId.trim().startsWith('consultation')) return false;
-    final u = bridgeUserId.trim();
-    if (u.isNotEmpty && chatId.contains('_$u')) return true;
-    return true;
-  }
+  static bool chatIdBelongsToUser(String chatId, String bridgeUserId) =>
+      ConsultationChatId.belongsToUser(chatId, bridgeUserId);
 
   /// 相談 ID の作成時刻（末尾 ms）だけで最新スレッドを選ぶ（古い長いスレッドの最新返信で勝たない）。
   static Future<String?> resolveLatestChatId({
@@ -39,12 +33,21 @@ class ConsultationActiveThreadResolver {
       if (ts > prev) scores[id] = ts;
     }
 
+    final mailBridgeOnly = await ConsultationUnifiedThread.mailBridgeOnlyChatIds();
+
+    void considerDisplay(String? chatId, int scoreMs) {
+      if (chatId == null || chatId.trim().isEmpty) return;
+      final id = chatId.trim();
+      if (mailBridgeOnly.contains(id)) return;
+      consider(id, scoreMs);
+    }
+
     final active = await DeveloperChatPref.getActiveChatId();
-    consider(active, timestampFromChatId(active ?? '') ?? 0);
+    considerDisplay(active, timestampFromChatId(active ?? '') ?? 0);
 
     final cachedIds = await BridgeThreadLocalStore.listCachedChatIds();
     for (final id in cachedIds) {
-      consider(id, timestampFromChatId(id) ?? 0);
+      considerDisplay(id, timestampFromChatId(id) ?? 0);
     }
 
     final user = FirebaseAuth.instance.currentUser;
@@ -65,7 +68,7 @@ class ConsultationActiveThreadResolver {
                 if (ms > score) score = ms;
               }
             }
-            consider(id, score);
+            considerDisplay(id, score);
           }
         }
       } catch (e) {

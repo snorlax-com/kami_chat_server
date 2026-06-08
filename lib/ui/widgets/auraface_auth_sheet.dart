@@ -110,14 +110,14 @@ class _AurafaceAuthSheetState extends State<AurafaceAuthSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              widget.title ?? '診断結果を保存して続きを見る',
+              widget.title ?? 'ログインして詳細を見る',
               style: Theme.of(context).textTheme.titleLarge,
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
               widget.subtitle ??
-                  '認証後、詳細な性格診断が開示され、次回も同じ内容を確認できます。',
+                  'Google でログインすると、詳細な性格診断を開示できます。',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Colors.white70,
                   ),
