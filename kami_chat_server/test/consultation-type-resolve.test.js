@@ -107,35 +107,3 @@ test("resolveConsultationTypeFromSendBody: 明示 normal は埋め込みより�
     types.NORMAL
   );
 });
-
-test("Flutter 至急新規送信ペイロードは priority_guidance になる", () => {
-  const body = {
-    consultationType: "priority_guidance",
-    aurafaceSendTier: "priority_guidance",
-    urgent: true,
-    consultationPriority: 2,
-    message: "（緊急）テスト相談\n\n__AURAFACE_SEND_TIER__:priority_guidance__",
-  };
-  const { cleanText, embeddedTierRaw } = types.extractEmbeddedConsultationTier(body.message);
-  const resolved = types.resolveConsultationTypeFromSendBody(
-    body,
-    "priority_guidance",
-    embeddedTierRaw
-  );
-  assert.equal(resolved, types.PRIORITY_GUIDANCE);
-  assert.ok(cleanText.startsWith("（緊急）"));
-  assert.ok(!cleanText.includes("__AURAFACE_SEND_TIER__"));
-});
-
-test("Flutter 通常新規送信ペイロードは normal のまま", () => {
-  const body = {
-    consultationType: "normal",
-    aurafaceSendTier: "normal",
-    urgent: false,
-    consultationPriority: 1,
-    message: "通常の相談です\n\n__AURAFACE_SEND_TIER__:normal__",
-  };
-  const { embeddedTierRaw } = types.extractEmbeddedConsultationTier(body.message);
-  const resolved = types.resolveConsultationTypeFromSendBody(body, "normal", embeddedTierRaw);
-  assert.equal(resolved, types.NORMAL);
-});

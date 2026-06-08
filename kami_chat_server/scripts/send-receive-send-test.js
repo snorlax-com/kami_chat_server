@@ -17,20 +17,14 @@ const http = require("http");
 const https = require("https");
 
 const BASE = process.argv[2] || "http://127.0.0.1:3000";
-const chatId = `consultation_${process.env.IDENTITY_DEV_UID || "test-user"}_${Date.now()}`;
-const userId = process.env.IDENTITY_DEV_UID || "test-user";
+const chatId = `test-srs-${Date.now()}`;
+const userId = "test-user";
 
 /** JSON オブジェクトのレスポンス body を安全に取り出す（HTML 404 等は {}） */
 function jsonBody(res) {
   const b = res.body;
   if (b !== null && typeof b === "object" && !Array.isArray(b)) return b;
   return {};
-}
-
-function devAuthHeaders() {
-  const secret = process.env.IDENTITY_DEV_SECRET;
-  if (!secret) return {};
-  return { "x-identity-dev-secret": secret };
 }
 
 function request(method, path, body = null) {
@@ -43,10 +37,7 @@ function request(method, path, body = null) {
       port: url.port || (isHttps ? 443 : 80),
       path: url.pathname + url.search,
       method,
-      headers: {
-        ...devAuthHeaders(),
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
+      headers: body ? { "Content-Type": "application/json" } : {},
     };
     const req = lib.request(opts, (res) => {
       let data = "";

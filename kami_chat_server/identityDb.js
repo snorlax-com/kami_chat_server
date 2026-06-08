@@ -66,13 +66,6 @@ create table if not exists chat_threads (
 
 create index if not exists idx_chat_threads_user_id on chat_threads(user_id);
 
-create table if not exists push_notification_log (
-  chat_id text not null,
-  message_id integer not null,
-  sent_at text not null,
-  primary key (chat_id, message_id)
-);
-
 create table if not exists messages (
   id text primary key,
   thread_id text not null,
@@ -83,79 +76,7 @@ create table if not exists messages (
 );
 `);
   _migrateChatThreadsLastMessage(db);
-  _migratePushNotificationLog(db);
-  _migrateFcmDeviceTokens(db);
-  _migrateBillingTables(db);
   return db;
-}
-
-function _migrateBillingTables(db) {
-  try {
-    db.exec(`
-CREATE TABLE IF NOT EXISTS purchases (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id TEXT NOT NULL,
-  product_id TEXT NOT NULL,
-  purchase_token TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS subscriptions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id TEXT NOT NULL,
-  product_id TEXT NOT NULL,
-  purchase_token TEXT NOT NULL UNIQUE,
-  status TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS tickets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id TEXT NOT NULL,
-  type TEXT NOT NULL,
-  amount INTEGER NOT NULL,
-  created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_chat_messages_user_id ON chat_threads(user_id);
-CREATE INDEX IF NOT EXISTS idx_purchases_token ON purchases(purchase_token);
-CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
-`);
-  } catch (e) {
-    console.error("[identityDb] migrate billing tables", e);
-  }
-}
-
-function _migrateFcmDeviceTokens(db) {
-  try {
-    db.exec(`
-create table if not exists fcm_device_tokens (
-  user_id text not null,
-  token text not null,
-  platform text,
-  updated_at text not null,
-  primary key (user_id, token)
-);
-create index if not exists idx_fcm_device_tokens_user_id on fcm_device_tokens(user_id);
-`);
-  } catch (e) {
-    console.error("[identityDb] migrate fcm_device_tokens", e);
-  }
-}
-
-function _migratePushNotificationLog(db) {
-  try {
-    db.exec(`
-create table if not exists push_notification_log (
-  chat_id text not null,
-  message_id integer not null,
-  sent_at text not null,
-  primary key (chat_id, message_id)
-);
-`);
-  } catch (e) {
-    console.error("[identityDb] migrate push_notification_log", e);
-  }
 }
 
 /** 既存 DB に last_message_at_ms を追加（メッセージ保持期限判定用） */
@@ -338,70 +259,6 @@ function listThreadsForUser(userId) {
     .all(userId);
 }
 
-function getUserIdForChatThread(chatId) {
-  if (!chatId) return null;
-  const db = getDb();
-  const r = db.prepare(`select user_id from chat_threads where id = ?`).get(chatId);
-  return r && r.user_id ? String(r.user_id) : null;
-}
-
-function wasPushNotificationSent(chatId, messageId) {
-  const db = getDb();
-  const r = db
-    .prepare(`select 1 from push_notification_log where chat_id = ? and message_id = ?`)
-    .get(chatId, messageId);
-  return !!r;
-}
-
-function markPushNotificationSent(chatId, messageId) {
-  const db = getDb();
-  db.prepare(
-    `insert or ignore into push_notification_log (chat_id, message_id, sent_at) values (?, ?, ?)`
-  ).run(chatId, messageId, new Date().toISOString());
-}
-
-function upsertFcmDeviceToken(userId, token, platform) {
-  if (!userId || !token) return;
-  const db = getDb();
-  const now = new Date().toISOString();
-  db.prepare(
-    `insert into fcm_device_tokens (user_id, token, platform, updated_at)
-     values (?, ?, ?, ?)
-     on conflict(user_id, token) do update set
-       platform = excluded.platform,
-       updated_at = excluded.updated_at`
-  ).run(String(userId).trim(), String(token).trim(), platform || "unknown", now);
-}
-
-function listFcmDeviceTokensForUser(userId) {
-  if (!userId) return [];
-  const db = getDb();
-  return db
-    .prepare(
-      `select token, platform from fcm_device_tokens where user_id = ? order by datetime(updated_at) desc`
-    )
-    .all(String(userId).trim());
-}
-
-function removeFcmDeviceToken(userId, token) {
-  if (!userId || !token) return;
-  const db = getDb();
-  db.prepare(`delete from fcm_device_tokens where user_id = ? and token = ?`).run(
-    String(userId).trim(),
-    String(token).trim()
-  );
-}
-
-/** chat_threads → chatId パターン `consultation_{userId}_{ts}` */
-function resolveUserIdForChat(chatId) {
-  const cid = String(chatId || "").trim();
-  if (!cid) return null;
-  const fromThread = getUserIdForChatThread(cid);
-  if (fromThread) return fromThread;
-  const m = cid.match(/^consultation_([^_]+)_/);
-  return m ? m[1] : null;
-}
-
 module.exports = {
   getDb,
   upsertUser,
@@ -414,11 +271,4 @@ module.exports = {
   getThreadLastMessageAtMs,
   bumpThreadLastMessageAtMs,
   listThreadsForUser,
-  getUserIdForChatThread,
-  wasPushNotificationSent,
-  markPushNotificationSent,
-  upsertFcmDeviceToken,
-  listFcmDeviceTokensForUser,
-  removeFcmDeviceToken,
-  resolveUserIdForChat,
 };
