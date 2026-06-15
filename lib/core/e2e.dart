@@ -1,3 +1,5 @@
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
+
 /// E2Eテスト用フラグ。URL に ?e2e=1 があるとき、または --dart-define=INTEGRATION_TEST_E2E=true で
 /// 統合テスト実行時は true。このとき年齢確認をスキップしホームを表示（実機の自動テスト用）。
 class E2E {
@@ -10,6 +12,9 @@ class E2E {
   static bool get isEnabled {
     try {
       if (_integrationTestE2E) return true;
+      // integration_test は dart-define が届かないことがあるため SharedPreferences 経由も見る
+      if (IntegrationTestFlags.cameraRoute) return true;
+      if (IntegrationTestFlags.forcePlayBilling) return true;
       final qp = Uri.base.queryParameters;
       return qp['e2e'] == '1';
     } catch (_) {

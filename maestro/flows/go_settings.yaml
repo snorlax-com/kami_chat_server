@@ -1,0 +1,7 @@
+appId: com.auraface.kami_face_oracle
+---
+- runFlow: go_home_tab.yaml
+- tapOn: "設定（ログイン・ログアウト）を開く"
+- extendedWaitUntil:
+    visible: "設定"
+    timeout: 15000

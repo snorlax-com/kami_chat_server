@@ -19,7 +19,7 @@ const STRICT_MAIL =
   process.env.STRICT_MAIL === "1" || String(process.env.STRICT_MAIL).toLowerCase() === "true";
 
 const USER_MSG = "E2Eテストメッセージ";
-const DEV_MSG = "開発者返信テスト";
+const DEV_MSG = "創設者（占い師）返信テスト";
 
 const result = {
   send: "NG",

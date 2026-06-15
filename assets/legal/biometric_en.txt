@@ -1,0 +1,37 @@
+AURAFACE BIOMETRIC INFORMATION POLICY & RELEASE
+Last Updated: [YYYY-MM-DD]
+
+This policy applies to the extent AuraFace collects or processes "biometric identifiers" or "biometric information" as defined by applicable biometric laws (including Illinois' Biometric Information Privacy Act "BIPA").
+
+1) NOTICE
+AuraFace may collect and process facial images that may constitute biometric identifiers/information under certain laws in order to provide the requested analysis.
+
+2) PURPOSE
+We process biometric data solely to provide the Service features you request and for limited security/fraud prevention.
+
+3) RETENTION SCHEDULE & DESTRUCTION GUIDELINES (PUBLIC POLICY)
+AuraFace will permanently destroy biometric identifiers/information:
+- when the initial purpose for collecting it has been satisfied; OR
+- within 3 years of your last interaction with AuraFace,
+whichever occurs first, unless a shorter period applies by our systems or unless retention is required by law.
+
+4) NO SALE / NO PROFIT
+AuraFace does not sell, lease, trade, or otherwise profit from your biometric data.
+
+5) DISCLOSURE
+AuraFace does not disclose biometric data to third parties except:
+- to Service providers strictly necessary to operate the Service under written contracts; or
+- as required by law (warrant/subpoena/court order), where applicable.
+
+6) SECURITY
+We use reasonable standards of care within our industry and at least the same level of care we use to protect other confidential information.
+
+7) BIOMETRIC RELEASE (EXPLICIT CONSENT)
+By clicking "I Agree" (or signing electronically), you:
+(a) acknowledge you have read this policy;
+(b) consent to AuraFace's collection, storage (if any), and use of your biometric data for the purposes described; and
+(c) authorize AuraFace to process your biometric data as described in this policy and in the Privacy Policy.
+
+You may withdraw consent at any time. Withdrawal may prevent you from using biometric-based features.
+
+Contact: privacy@[your-domain]

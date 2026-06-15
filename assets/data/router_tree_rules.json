@@ -1,0 +1,275 @@
+{
+  "thresholds": {
+    "brow_angle": {
+      "up": 0.2,
+      "down": -0.2,
+      "very_flat": [-0.1, 0.1],
+      "flat": [-0.15, 0.15],
+      "hachi": -0.3
+    },
+    "brow_length": {"high": 0.9, "low": 0.3},
+    "brow_thickness": {"high": 0.95, "low": 0.2},
+    "brow_shape": {"curve": 0.6, "line": 0.2},
+    "brow_space": {"wide": 0.9, "narrow": 0.2},
+    "brow_tidy": {"neat": 0.95, "messy": 0.15},
+    "eye_balance": {"high": 0.85, "low": 0.35},
+    "eye_size": {"high": 0.85, "low": 0.3},
+    "eye_shape": {"sharp": 0.95},
+    "mouth_size": {"large": 0.8, "small": 0.25}
+  },
+  "pillars": {
+    "Amatera": {
+      "brow_angle": ">0.2",
+      "brow_length": ">0.9",
+      "brow_thickness": ">0.95",
+      "brow_shape": ">0.6 or <0.2",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["丸顔", "台座顔", "三角形顔"]
+    },
+    "Yatael": {
+      "brow_angle": ">0.2 or -0.1~0.1 or <-0.3",
+      "brow_length": ">0.9",
+      "brow_thickness": ">0.95",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["丸顔"]
+    },
+    "Skura": {
+      "brow_angle": "-0.2~0.2 or -0.3~-0.5",
+      "brow_length": ">0.9",
+      "brow_thickness": ">0.95",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["丸顔", "台座顔", "三角形顔"]
+    },
+    "Delphos": {
+      "brow_angle": ">0.2",
+      "brow_length": "<0.3",
+      "brow_thickness": ">0.95",
+      "brow_shape": "<0.2",
+      "brow_space": "<0.2",
+      "brow_tidy": "<0.3",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": "<0.25",
+      "face_shape": ["細長顔", "卵顔", "逆三角形顔", "四角顔"]
+    },
+    "Amanoira": {
+      "brow_angle": "<-0.2",
+      "brow_length": "<0.3",
+      "brow_thickness": "<0.3",
+      "brow_shape": "<0.3",
+      "brow_space": "<0.2",
+      "brow_tidy": "<0.3",
+      "eye_balance": "<0.35",
+      "eye_size": "<0.3",
+      "eye_shape": ">0.95",
+      "mouth_size": "<0.25",
+      "face_shape": ["細長顔", "逆三角形顔"]
+    },
+    "Noirune": {
+      "brow_angle": "<-0.2",
+      "brow_length": "<0.3",
+      "brow_thickness": "<0.2",
+      "brow_shape": ">0.6",
+      "brow_space": "<0.2",
+      "brow_tidy": "<0.3",
+      "eye_balance": "<0.35",
+      "eye_size": "<0.3",
+      "eye_shape": ">0.95",
+      "mouth_size": "<0.25",
+      "face_shape": []
+    },
+    "Ragias": {
+      "brow_angle": ">0.2",
+      "brow_length": "<0.2",
+      "brow_thickness": ">0.95",
+      "brow_shape": "<0.2",
+      "brow_space": "<0.3",
+      "brow_tidy": "<0.15",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["長方形顔", "台座顔", "卵顔", "四角顔"]
+    },
+    "Verdatsu": {
+      "brow_angle": ">0.2",
+      "brow_length": "<0.3",
+      "brow_thickness": ">0.95",
+      "brow_shape": "<0.2",
+      "brow_space": "<0.3",
+      "brow_tidy": "<0.3",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["細長顔", "長方形顔", "卵顔", "逆三角形顔"]
+    },
+    "Osiria": {
+      "brow_angle": "-0.2~0.2",
+      "brow_length": ">0.9",
+      "brow_thickness": ">0.95",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["長方形顔", "台座顔", "三角形顔"]
+    },
+    "Fatemis": {
+      "brow_angle": ">0.2",
+      "brow_length": "<0.2",
+      "brow_thickness": ">0.95",
+      "brow_shape": "<0.2",
+      "brow_space": "<0.3",
+      "brow_tidy": "<0.15",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": "<0.25",
+      "face_shape": ["細長顔", "卵顔", "逆三角形顔", "四角顔"]
+    },
+    "Kanonis": {
+      "brow_angle": "<-0.2 or -0.15~0.15 or <-0.3",
+      "brow_length": ">0.9",
+      "brow_thickness": "<0.2",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85 or <0.35",
+      "eye_size": "<0.3 or >0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["丸顔", "卵顔", "台座顔", "三角形顔"]
+    },
+    "Sylna": {
+      "brow_angle": "<-0.2 or -0.15~0.15 or <-0.3",
+      "brow_length": ">0.9",
+      "brow_thickness": "<0.2",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85 or <0.35",
+      "eye_size": "<0.3 or >0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["丸顔", "卵顔", "台座顔", "三角形顔"]
+    },
+    "Yorusi": {
+      "brow_angle": "-0.2~0.2",
+      "brow_length": ">0.9",
+      "brow_thickness": ">0.95",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": []
+    },
+    "Tenkora": {
+      "brow_angle": ">0.2",
+      "brow_length": "<0.2",
+      "brow_thickness": ">0.95",
+      "brow_shape": "<0.3",
+      "brow_space": "<0.3",
+      "brow_tidy": "<0.15",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["長方形顔", "四角顔"]
+    },
+    "Shisaru": {
+      "brow_angle": "-0.2~0.2",
+      "brow_length": ">0.9",
+      "brow_thickness": ">0.95",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": ["四角顔"]
+    },
+    "Mimika": {
+      "brow_angle": "<-0.2",
+      "brow_length": "<0.3",
+      "brow_thickness": "<0.2",
+      "brow_shape": ">0.6",
+      "brow_space": "<0.2",
+      "brow_tidy": "<0.3",
+      "eye_balance": "<0.35",
+      "eye_size": "<0.3",
+      "eye_shape": ">0.95",
+      "mouth_size": "<0.25",
+      "face_shape": ["細長顔", "逆三角形顔", "四角顔"]
+    },
+    "Tenmira": {
+      "brow_angle": "-0.15~0.15 or -0.2~0.2",
+      "brow_length": ">0.9",
+      "brow_thickness": ">0.95",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": []
+    },
+    "Shiran": {
+      "brow_angle": "-0.15~0.15 or -0.2~0.2",
+      "brow_length": ">0.9",
+      "brow_thickness": ">0.95",
+      "brow_shape": ">0.6",
+      "brow_space": ">0.9",
+      "brow_tidy": ">0.95",
+      "eye_balance": ">0.85",
+      "eye_size": ">0.85",
+      "eye_shape": ">0.95",
+      "mouth_size": ">0.8",
+      "face_shape": []
+    }
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

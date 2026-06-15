@@ -11,10 +11,14 @@ class MeditationScene extends StatefulWidget {
   final Deity deity;
   final int durationMinutes; // 瞑想時間（分）
 
+  /// false のとき、遷移前に既に `bell-a-99888.mp3` を鳴らした場合など（重複再生を防ぐ）
+  final bool playEntryBells;
+
   const MeditationScene({
     super.key,
     required this.deity,
     this.durationMinutes = 5,
+    this.playEntryBells = true,
   });
 
   @override
@@ -108,8 +112,10 @@ class _MeditationSceneState extends State<MeditationScene> with TickerProviderSt
     // 瞑想音楽を再生するので、BGMを一時停止
     BackgroundMusicService().pauseForOtherSound();
 
-    // 瞑想開始時にベルを3回鳴らす（完了を待つ）
-    await _playBell(3);
+    // 瞑想開始時にベルを3回鳴らす（一覧から遷移した場合は遷移前に鳴らしていることがある）
+    if (widget.playEntryBells) {
+      await _playBell(3);
+    }
 
     try {
       // オーディオプレイヤーの設定はinitStateで完了している

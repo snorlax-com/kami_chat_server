@@ -1,0 +1,59 @@
+appId: com.auraface.kami_face_oracle
+---
+# ログアウト・アカウント切替不正チェック（Aの券がBで使えないこと）
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/go_settings.yaml
+# ログアウト（ログイン済みの場合）
+- runFlow:
+    when:
+      visible: "ログアウト"
+    commands:
+      - tapOn: "ログアウト"
+      - extendedWaitUntil:
+          visible: "ログアウト"
+          timeout: 10000
+      - tapOn: "ログアウト"
+      - extendedWaitUntil:
+          visible: "ログアウトしました"
+          timeout: 15000
+          optional: true
+- assertVisible:
+    text: "現在は匿名で利用中です"
+    optional: true
+# 別アカウントでログイン（手動/テストアカウントB前提）
+- tapOn:
+    text: "ログイン"
+    optional: true
+- tapOn:
+    text: "Googleで続ける"
+    optional: true
+- extendedWaitUntil:
+    visible: "ログインしました"
+    timeout: 60000
+    optional: true
+- back
+- runFlow: flows/go_consultation_tab.yaml
+- tapOn:
+    text: "メッセージを入力（送信時に券1枚）"
+    optional: true
+- inputText: "別アカウントでAの券が使えないか確認"
+- tapOn: "送信"
+# B が未加入なら送信不可
+- extendedWaitUntil:
+    visible: "サブスクが必要です"
+    timeout: 20000
+    optional: true
+- assertVisible:
+    text: "サブスクが必要です"
+    optional: true
+- tapOn:
+    text: "あとで"
+    optional: true
+# 他アカウントの券残数が表示されない（0枚または未加入表示）
+- assertNotVisible:
+    text: "通常券: 99 枚"
+    optional: true

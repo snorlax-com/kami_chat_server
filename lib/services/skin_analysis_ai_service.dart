@@ -5,7 +5,9 @@ import 'dart:io' if (dart.library.html) 'package:kami_face_oracle/core/io_stub.d
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:kami_face_oracle/config/diagnosis_server_config.dart';
 import 'package:kami_face_oracle/features/consent/consent_service.dart';
+import 'package:kami_face_oracle/services/auth_api_headers.dart';
 
 /// AI診断結果
 class SkinAIDiagnosisResult {
@@ -78,7 +80,7 @@ class DiagnosisItem {
 /// 肌分析AIサービス
 class SkinAnalysisAIService {
   // APIサーバーのURL（サーバー側の/predictと同じURLを使用）
-  static const String _defaultApiUrl = 'http://45.77.26.42:8000';
+  static String get _defaultApiUrl => DiagnosisServerConfig.baseUrl;
 
   String? _apiUrl;
 
@@ -134,6 +136,7 @@ class SkinAnalysisAIService {
         final url = Uri.parse('$_apiUrl/analyze');
         final request = http.MultipartRequest('POST', url);
         request.headers['X-Consent-Session-ID'] = sessionId;
+        request.headers.addAll(await AuthApiHeaders.authorizationJson());
         request.files.add(
           await http.MultipartFile.fromPath('image', imageFile.path),
         );

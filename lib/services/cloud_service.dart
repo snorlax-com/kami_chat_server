@@ -20,6 +20,17 @@ class CloudService {
   /// Firebase がフル利用可能か（匿名セッションあり。相談の Firestore 同期など）
   static bool get isAvailable => _available;
 
+  /// Firestore 書き込みが利用可能か（API 未有効化等で false になる）
+  static bool _firestoreUsable = true;
+  static bool get firestoreUsable => _available && _firestoreUsable;
+
+  /// Firestore API 未有効化・権限拒否などで書き込みを止める
+  static void markFirestoreUnavailable([Object? cause]) {
+    if (!_firestoreUsable) return;
+    _firestoreUsable = false;
+    debugPrint('[CloudService] Firestore writes disabled: $cause');
+  }
+
   static Future<void> init() async {
     if (_initialized) return;
     _initialized = true;

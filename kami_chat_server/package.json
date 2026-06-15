@@ -13,17 +13,24 @@
     "test:render-smoke": "node scripts/render-production-smoke.js https://kami-chat-server.onrender.com",
     "test:local-all": "bash scripts/run-local-e2e.sh",
     "test:consultation-mail": "node --test test/*.test.js",
+    "test:urgent-send": "node scripts/urgent-send-server-test.js",
+    "test:urgent-send:prod-smoke": "node scripts/urgent-send-server-test.js https://kami-chat-server.onrender.com",
     "test:identity-api": "node scripts/identity-api-e2e.js",
     "test:all": "node --test test/*.test.js && node scripts/identity-api-e2e.js",
     "firebase:b64": "node scripts/firebase-service-account-to-b64.js",
     "render:upsert-firebase-b64": "node scripts/render-upsert-env-from-file.js FIREBASE_SERVICE_ACCOUNT_JSON_B64 ./secrets/render-FIREBASE_SERVICE_ACCOUNT_JSON_B64.txt"
   },
   "dependencies": {
+    "bcrypt": "^5.1.1",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
+    "express-rate-limit": "^7.5.0",
     "firebase-admin": "^12.6.0",
+    "googleapis": "^144.0.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
     "resend": "^4.0.1"
   }
 }

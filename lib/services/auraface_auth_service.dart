@@ -7,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'package:kami_face_oracle/config/google_web_client_id.dart';
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
 
 /// Google / Apple / メール（Firebase Email+Password）
 ///
@@ -149,7 +150,31 @@ class AurafaceAuthService {
     );
   }
 
+  /// 進行中の Google ログイン UI を閉じる（Android 戻るでキャンセルしたとき）。
+  static Future<void> abortPendingGoogleSignIn() async {
+    IntegrationTestFlags.cancelGoogleSignInHangForTest();
+    if (kIsWeb) return;
+    _logAuth('abortPendingGoogleSignIn');
+    try {
+      await _ensureGoogleSignInInitialized();
+      await GoogleSignIn.instance.signOut();
+    } catch (e) {
+      _logAuth('abortPendingGoogleSignIn', '$e');
+    }
+  }
+
   static Future<UserCredential> signInWithGoogle() async {
+    if (IntegrationTestFlags.hasGoogleSignInHang) {
+      _logAuth('signInWithGoogle', 'waiting integration_test hang gate');
+      try {
+        await IntegrationTestFlags.waitGoogleSignInHangGate();
+      } catch (_) {
+        throw FirebaseAuthException(
+          code: 'aborted-by-user',
+          message: 'ログインがキャンセルされました',
+        );
+      }
+    }
     if (kIsWeb) {
       final provider = GoogleAuthProvider();
       provider.addScope('email');

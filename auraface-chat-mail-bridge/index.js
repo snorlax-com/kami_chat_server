@@ -90,7 +90,7 @@ function escapeHtml(str) {
 function renderReplyPage({ chatId, messages, token, userName }) {
   const items = messages
     .map((m) => {
-      const who = m.role === "dev" ? "開発者" : userName || "ユーザー";
+      const who = m.role === "dev" ? "創設者（占い師）" : userName || "ユーザー";
       return `
       <div style="margin:8px 0;padding:10px;border:1px solid #ddd;border-radius:8px;">
         <div style="font-size:12px;color:#666;">${escapeHtml(who)} / ${new Date(m.createdAt).toLocaleString()}</div>

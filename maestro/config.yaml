@@ -1,0 +1,5 @@
+# Maestro 共通設定（maestro test maestro/ で読み込まれる）
+appId: com.auraface.kami_face_oracle
+
+env:
+  APP_ID: com.auraface.kami_face_oracle

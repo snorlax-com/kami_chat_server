@@ -11,7 +11,7 @@ import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/services/consultation_mail_new_send.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
-import 'package:kami_face_oracle/ui/pages/consultation_mail_bridge_test_page.dart';
+import 'package:kami_face_oracle/services/bridge_thread_local_store.dart';
 import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
 import 'package:kami_face_oracle/services/consultation_identity.dart';
 
@@ -99,6 +99,8 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
 
   Future<void> _send({required bool urgent, required int coinCost, int? gemCost}) async {
     if (_controller.text.trim().isEmpty) return;
+    final fbUser = await ConsultationIdentity.requireFirebaseUserForConsultation(context);
+    if (fbUser == null) return;
     final trimmedBody = _controller.text.trim();
     final bodyText =
         AuraFaceChatMailService.applyNewUrgentConsultationPrefix(urgent: urgent, message: trimmedBody);
@@ -167,7 +169,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
       // 定期ポーリングを開始
       _startPolling(response.cid!);
 
-      // 開発者へGmail通知（メールブリッジ）。URL未設定時は本番URL or ローカルを使用
+      // 創設者（占い師）へGmail通知（メールブリッジ）。URL未設定時は本番URL or ローカルを使用
       final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
       final bridgeUrl = AuraFaceChatMailService.consultationSendBaseUrl(savedUrl);
       bool? mailSent;
@@ -190,6 +192,12 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
         mailSent = mailRes.mailSent;
         if (mailRes.success) {
           await DeveloperChatPref.setActiveChatId(chatId, consultationType: mailCt);
+          await BridgeThreadLocalStore.appendUserMessage(
+            chatId: chatId,
+            text: bodyText,
+            consultationType: mailCt,
+            messageId: mailRes.messageId,
+          );
         }
         if (mounted && mailRes.success && mailRes.mailSent == false) {
           final detail = mailRes.mailError != null && mailRes.mailError!.isNotEmpty
@@ -198,7 +206,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                '相談は送信しましたが、開発者へのGmail通知に失敗しました。サーバー（Render）のメール環境変数を確認してください。$detail',
+                '相談は送信しましたが、創設者（占い師）へのGmail通知に失敗しました。サーバー（Render）のメール環境変数を確認してください。$detail',
               ),
               backgroundColor: Colors.deepOrange,
               duration: const Duration(seconds: 8),
@@ -238,7 +246,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                '$coinLine。開発者へのメール通知はサーバー応答では確認できません。'
+                '$coinLine。創設者（占い師）へのメール通知はサーバー応答では確認できません。'
                 'kami-chat-server を最新にデプロイしてください。',
               ),
               backgroundColor: Colors.amber.shade800,
@@ -268,7 +276,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
         title: const Text('占い相談'),
         actions: [
           IconButton(
-            tooltip: '開発者とのやりとり',
+            tooltip: '創設者（占い師）とのやりとり',
             icon: const Icon(Icons.forum_outlined),
             onPressed: () {
               Navigator.push(
@@ -317,15 +325,6 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
               ],
             ),
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.email_outlined, size: 20),
-              label: const Text('開発者にメールで相談（Gmail通知・返信が届く）'),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ConsultationMailBridgeTestPage()),
-              ),
-            ),
-            const SizedBox(height: 16),
 
             // チャット表示エリア
             if (_messages.isNotEmpty) ...[

@@ -1,0 +1,294 @@
+{
+  "amatera": {
+    "good": [
+      {
+        "id": "noirune",
+        "name": "ノワルネ",
+        "reason": "Amateraは行動力と明るさの象徴。一方のNoiruneは内省的で静か。性格的に正反対だが、互いに不足している部分を補完する関係。Amateraの強さがNoiruneに希望を与え、Noiruneの落ち着きがAmateraに思慮をもたらす。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "tenkora",
+        "name": "テンコラ",
+        "reason": "どちらも強い主導性と自我を持つため、性格的に競い合う傾向がある。Amateraが理想を求め、Tenkoraが即行動するため、衝突が起きやすい。"
+      }
+    ]
+  },
+  "yatael": {
+    "good": [
+      {
+        "id": "fatemis",
+        "name": "ファテミス",
+        "reason": "Yataelは穏やかで理性的。Fatemisは繊細で分析的。お互いの知性と静かな情熱を理解し合える関係。言葉が少なくても心で通じるような精神的親和性が高い。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "mimika",
+        "name": "ミミカ",
+        "reason": "Yataelの現実的・論理的な性格と、Mimikaの夢想的な世界観が噛み合わない。Yataelは現実に戻そうとし、Mimikaは感情で逃避しようとするため、互いに疲れる。"
+      }
+    ]
+  },
+  "skura": {
+    "good": [
+      {
+        "id": "kanonis",
+        "name": "カノニス",
+        "reason": "Skuraは柔らかく思いやりがあり、Kanonisは落ち着いて調和を重んじる。優しさと安定が融合し、心の癒しが倍増する関係。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "ragias",
+        "name": "ラギアス",
+        "reason": "Skuraは人に寄り添いすぎる一方、Ragiasは自己主張が強く支配的。Skuraが圧倒され、心のバランスを崩す危険がある。"
+      }
+    ]
+  },
+  "delphos": {
+    "good": [
+      {
+        "id": "amatera",
+        "name": "アマテラ",
+        "reason": "Delphosの冷静な分析と、Amateraの前向きな行動が噛み合う。一方が思考、もう一方が実行を担う理想的ペア。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "tenkora",
+        "name": "テンコラ",
+        "reason": "Delphosは静寂を重んじる内向的タイプ。Tenkoraは突発的で衝動的。DelphosにとってTenkoraのエネルギーは落ち着きを乱す。"
+      }
+    ]
+  },
+  "amanoira": {
+    "good": [
+      {
+        "id": "yatael",
+        "name": "ヤタエル",
+        "reason": "Amanoiraは感情豊かでロマンチスト、Yataelは冷静で包容力がある。感情と理性のバランスが取れ、安心して感情を表現できる関係。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "ragias",
+        "name": "ラギアス",
+        "reason": "Amanoiraの繊細さとRagiasの激しさは相反する。Amanoiraは熱に疲弊し、Ragiasは理解されず苛立つ。"
+      }
+    ]
+  },
+  "noirune": {
+    "good": [
+      {
+        "id": "amatera",
+        "name": "アマテラ",
+        "reason": "Noiruneは内省的で繊細、Amateraは外向的で明るい。性格的補完により、Noiruneの深さがAmateraを導き、Amateraの光がNoiruneを照らす。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "shisaru",
+        "name": "シサル",
+        "reason": "Noiruneは静寂を求めるが、Shisaruは感情を爆発させるタイプ。Noiruneが消耗して距離を取る傾向にある。"
+      }
+    ]
+  },
+  "ragias": {
+    "good": [
+      {
+        "id": "sylna",
+        "name": "シルナ",
+        "reason": "Ragiasは情熱的で勢いがあるが、感情の起伏が激しい。Sylnaの穏やかさが火を和らげ、エネルギーが良い方向に循環する。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "amanoira",
+        "name": "アマノイラ",
+        "reason": "Ragiasの直情的な性格が、感情的なAmanoiraにとって刺激が強すぎる。気持ちのズレが不安を生む。"
+      }
+    ]
+  },
+  "verdatsu": {
+    "good": [
+      {
+        "id": "noirune",
+        "name": "ノワルネ",
+        "reason": "両者とも内省的で落ち着いた性格。Verdatsuの安定感がNoiruneの感情を受け止める。話さなくても理解できるような穏やかな関係。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "shisaru",
+        "name": "シサル",
+        "reason": "Shisaruの直感的・感情的な動きが、Verdatsuの論理的な思考と噛み合わない。意見の衝突が生じやすい。"
+      }
+    ]
+  },
+  "osiria": {
+    "good": [
+      {
+        "id": "kanonis",
+        "name": "カノニス",
+        "reason": "自由を求めるOsiriaと、調和を愛するKanonisはバランスが取れている。Osiriaの感性をKanonisが穏やかに支える関係。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "tenkora",
+        "name": "テンコラ",
+        "reason": "Osiriaは柔軟で流動的、Tenkoraは直線的で衝動的。行動原理が真逆で、誤解が生じやすい。"
+      }
+    ]
+  },
+  "fatemis": {
+    "good": [
+      {
+        "id": "yatael",
+        "name": "ヤタエル",
+        "reason": "思索と洞察の共鳴。お互いが考えを深め合い、静かな信頼でつながる。寡黙な友情のような関係。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "tenkora",
+        "name": "テンコラ",
+        "reason": "Fateを重視する慎重なFatemisに対し、Tenkoraは即断即決型。テンポが合わず、誤解が生じやすい。"
+      }
+    ]
+  },
+  "kanonis": {
+    "good": [
+      {
+        "id": "skura",
+        "name": "サクラ",
+        "reason": "感情表現が穏やかで、互いに安心を与える。対話がなくても通じ合う穏やかな関係。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "ragias",
+        "name": "ラギアス",
+        "reason": "Ragiasの激しさがKanonisの繊細さをかき乱す。落ち着きを求めるKanonisが距離を置く傾向に。"
+      }
+    ]
+  },
+  "sylna": {
+    "good": [
+      {
+        "id": "ragias",
+        "name": "ラギアス",
+        "reason": "対極の性格で、バランスが取れる。Sylnaの優しさがRagiasの衝動を鎮め、Ragiasの情熱がSylnaに活力を与える。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "shisaru",
+        "name": "シサル",
+        "reason": "Sylnaは争いを避けるが、Shisaruは真っ向勝負を挑むタイプ。平和主義と戦闘心が相容れない。"
+      }
+    ]
+  },
+  "tenkora": {
+    "good": [
+      {
+        "id": "delphos",
+        "name": "デルフォス",
+        "reason": "思慮深いDelphosがTenkoraの衝動を制御し、力の方向を正す。衝動と理性のバランスが完璧。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "amanoira",
+        "name": "アマノイラ",
+        "reason": "感情的なAmanoiraが、Tenkoraの強引さに不安を感じやすい。支配関係に陥る可能性がある。"
+      }
+    ]
+  },
+  "yorusi": {
+    "good": [
+      {
+        "id": "skura",
+        "name": "サクラ",
+        "reason": "優しさと誠実さが共鳴。守りたいという想いでつながる関係。安心感のある安定ペア。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "noirune",
+        "name": "ノワルネ",
+        "reason": "Yorusiのまっすぐな性格が、Noiruneの複雑な内面に入り込みにくい。誤解が生じやすい。"
+      }
+    ]
+  },
+  "shisaru": {
+    "good": [
+      {
+        "id": "ragias",
+        "name": "ラギアス",
+        "reason": "共に行動派で情熱的。お互いの勢いを理解し合える。一緒にいると活力が増す同志的関係。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "noirune",
+        "name": "ノワルネ",
+        "reason": "Noiruneの内省的な性格に、Shisaruの直線的な行動が理解されない。感情のズレが大きい。"
+      }
+    ]
+  },
+  "mimika": {
+    "good": [
+      {
+        "id": "sylna",
+        "name": "シルナ",
+        "reason": "両者とも穏やかで感受性が強く、優しさでつながる関係。Mimikaの夢想をSylnaが現実に導く。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "ragias",
+        "name": "ラギアス",
+        "reason": "Mimikaの幻想的性格をRagiasの現実的エネルギーが打ち砕く。感受性が刺激されすぎて疲れる。"
+      }
+    ]
+  },
+  "tenmira": {
+    "good": [
+      {
+        "id": "verdatsu",
+        "name": "ヴェルダツ",
+        "reason": "思慮深く、論理的で穏やかな二柱。話すよりも「共に静かに過ごす」ことで理解し合う。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "tenkora",
+        "name": "テンコラ",
+        "reason": "冷静なTenmiraにとって、Tenkoraの衝動性は刺激が強すぎる。波長が合わない。"
+      }
+    ]
+  },
+  "shiran": {
+    "good": [
+      {
+        "id": "delphos",
+        "name": "デルフォス",
+        "reason": "言葉を超えた静けさの共鳴。沈黙の中で通じ合う深い理解関係。"
+      }
+    ],
+    "bad": [
+      {
+        "id": "ragias",
+        "name": "ラギアス",
+        "reason": "Shiranの静けさとRagiasの激しさは真逆。ShiranにとってRagiasはノイズのように感じられる。"
+      }
+    ]
+  }
+}
+
+
+
+

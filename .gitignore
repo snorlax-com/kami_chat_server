@@ -1,4 +1,5 @@
 # Miscellaneous
+*.class
 *.log
 *.pyc
 *.swp
@@ -9,6 +10,10 @@
 .history
 .svn/
 .swiftpm/
+migrate_working_dir/
+scripts/certs/
+debug_logcat_filtered.txt
+debug_logcat_pid.txt
 
 # IntelliJ / Android Studio
 *.iml
@@ -16,13 +21,20 @@
 *.iws
 .idea/
 
+# VS Code (optional)
+#.vscode/
+
 # Flutter / Dart
+**/doc/api/
+**/ios/Flutter/.last_build_id
 .dart_tool/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 build/
 coverage/
+app.*.symbols
+app.*.map.json
 
 # Flutter assets (kept locally; large binaries)
 assets/
@@ -30,11 +42,12 @@ assets/
 # Firebase (API keys; keep local or use CI secrets)
 android/app/google-services.json
 
-# CocoaPods
+# CocoaPods / Gradle
 ios/Pods/
-
-# Gradle
 android/.gradle/
+/android/app/debug
+/android/app/profile
+/android/app/release
 
 # Node
 node_modules/
@@ -50,12 +63,14 @@ node_modules/
 debug_logs/
 logs/
 output/
+e2e/node_modules/
 e2e/test-results/
 e2e/playwright-report/
 e2e/blob-report/
 e2e/playwright/.cache/
+test-results/
 
-# Local backups / generated platform folders (keep out of git)
+# Local backups / generated platform folders
 github_chat_minimal/
 macos/
 macos_backup_*/
@@ -63,65 +78,7 @@ macos_backup_*/
 # Lockfile (keep local in this repo layout)
 pubspec.lock
 
-# Miscellaneous
-debug_logcat_filtered.txt
-debug_logcat_pid.txt
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
-scripts/certs/
-
-# IntelliJ related
-*.iml
-*.ipr
-*.iws
-.idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
-.dart_tool/
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
-/build/
-/coverage/
-
-# Symbolication related
-app.*.symbols
-
-# Obfuscation related
-app.*.map.json
-
-# Firebase (API keys; keep local or use CI secrets)
-android/app/google-services.json
-
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
-
-# E2E (Playwright)
-e2e/node_modules/
-e2e/test-results/
-e2e/playwright-report/
-e2e/blob-report/
-e2e/playwright/.cache/
-.dart_tool
-ios/Pods/
-android/.gradle/
-node_modules/
+# Bridge / server runtime data
+auraface-chat-mail-bridge/.env
+auraface-chat-mail-bridge/data.sqlite
+kami_chat_server/data/

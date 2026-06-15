@@ -1,0 +1,8 @@
+"""
+本番サーバーに既存の /analyze や /v1/support/send がある場合、
+このファイルを legacy_extensions.py にコピーして register_legacy_routes を実装してください。
+"""
+
+# def register_legacy_routes(app):
+#     from your_existing_module import router
+#     app.include_router(router)

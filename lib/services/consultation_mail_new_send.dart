@@ -15,6 +15,8 @@ class ConsultationMailNewSend {
     required bool urgent,
     String? userEmail,
     String? userName,
+    String? fcmToken,
+    String? fcmPlatform,
   }) {
     return mailService.sendLockedNewConsultation(
       userId: userId,
@@ -24,6 +26,8 @@ class ConsultationMailNewSend {
       urgent: urgent,
       userEmail: userEmail,
       userName: userName,
+      fcmToken: fcmToken,
+      fcmPlatform: fcmPlatform,
     );
   }
 

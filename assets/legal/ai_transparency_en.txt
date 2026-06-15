@@ -1,0 +1,22 @@
+AURAFACE AI TRANSPARENCY NOTICE
+Last Updated: [YYYY-MM-DD]
+
+AuraFace uses artificial intelligence ("AI") to generate outputs.
+
+1) AI-GENERATED OUTPUTS
+Outputs are produced by automated systems and are probabilistic. They may be inaccurate, incomplete, or misleading.
+
+2) NOT FOR CRITICAL DECISIONS
+Do not use AuraFace outputs for medical, legal, employment, insurance, credit, housing, or other high-stakes decisions.
+
+3) NO LEGALLY SIGNIFICANT AUTOMATED DECISIONS
+AuraFace does not perform automated decision-making that produces legal or similarly significant effects about you.
+
+4) USER CONTROLS
+You may:
+- stop using the Service at any time,
+- withdraw consent for biometric processing,
+- request deletion of your data.
+
+5) CONTACT
+ai@[your-domain]

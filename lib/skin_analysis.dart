@@ -344,26 +344,89 @@ extension SkinAnalyzerDelta on SkinAnalyzer {
   }
 }
 
-/// 美運スコア算出（0..1）
-/// 重み例: ツヤ0.25/目輝き0.2/口角0.15/血色0.15/むくみ逆数0.15/均一0.1
+/// 顔診断（美運）: 艶 0..1（shineScore 優先）
+double faceDiagnosisGloss(SkinAnalysisResult skin) {
+  final dull = (skin.dullnessIndex ?? 0.0).clamp(0.0, 1.0);
+  return (skin.shineScore ?? (skin.brightness * (1.0 - dull))).clamp(0.0, 1.0);
+}
+
+/// 顔診断: 潤い 0..1（乾燥指標の逆。dryness は通常 0–100、≤1 のときは比率として扱う）
+double faceDiagnosisMoisture(SkinAnalysisResult skin) {
+  final raw = skin.dryness ?? 50.0;
+  if (raw <= 1.0) return (1.0 - raw).clamp(0.0, 1.0);
+  return ((100.0 - raw) / 100.0).clamp(0.0, 1.0);
+}
+
+/// 0–100 と 0–1 の両方に対応（プレースホルダー互換）
+double _evenness01(SkinAnalysisResult skin) {
+  final v = skin.evenness ?? 50.0;
+  if (v <= 1.0) return v.clamp(0.0, 1.0);
+  return (v / 100.0).clamp(0.0, 1.0);
+}
+
+/// 赤みを 0–100 スケールに統一（≤1 は比率とみなす）
+double _redness0to100(SkinAnalysisResult skin) {
+  final v = skin.redness ?? 40.0;
+  if (v <= 1.0) return (v * 100.0).clamp(0.0, 100.0);
+  return v.clamp(0.0, 100.0);
+}
+
+/// 顔診断: 血色 0..1（透明感 evenness と赤みの適正帯を合成）
+double faceDiagnosisBloodTone(SkinAnalysisResult skin) {
+  final even = _evenness01(skin);
+  final r = _redness0to100(skin);
+  const idealRed = 42.0;
+  const spanRed = 55.0;
+  final redFit = (1.0 - (r - idealRed).abs() / spanRed).clamp(0.0, 1.0);
+  return (0.55 * even + 0.45 * redFit).clamp(0.0, 1.0);
+}
+
+/// 艶・潤い・血色の平均（0..1）からその日の調子ランク S/A/B/C
+String skinConditionGradeFromAverage(double avg01) {
+  final a = avg01.clamp(0.0, 1.0);
+  if (a >= 0.78) return 'S';
+  if (a >= 0.62) return 'A';
+  if (a >= 0.48) return 'B';
+  return 'C';
+}
+
+/// [skin] のつや・潤い・血色から S/A/B/C
+String skinConditionGradeLetter(SkinAnalysisResult skin) {
+  final g = faceDiagnosisGloss(skin);
+  final m = faceDiagnosisMoisture(skin);
+  final b = faceDiagnosisBloodTone(skin);
+  return skinConditionGradeFromAverage((g + m + b) / 3.0);
+}
+
+/// ランクの短い日本語ラベル（見出し用）
+String skinConditionGradeTitleJa(String letter) {
+  switch (letter) {
+    case 'S':
+      return '最高の調子';
+    case 'A':
+      return 'とても良い調子';
+    case 'B':
+      return 'そこそこの調子';
+    case 'C':
+      return 'ケアを強めたい調子';
+    default:
+      return '—';
+  }
+}
+
+/// 美運スコア（顔診断）算出 0..1 — **艶・潤い・血色の3要素のみ**（等重み平均）
+/// [features] / 目の明るさ / むくみ等は使用しない（シグネチャ互換のため残す）
 double computeBeautyLuckScore({
   required SkinAnalysisResult skin,
   required FaceFeatures features,
   double eyeBrightness = 0.6,
   double puffiness = 0.3,
-  double symmetry = 0.6, // 参考（未使用だが拡張余地）
+  double symmetry = 0.6,
 }) {
-  final gloss = (skin.brightness * (1.0 - (skin.dullnessIndex ?? 0.0))).clamp(0.0, 1.0);
-  final even = skin.uniformity.clamp(0.0, 1.0);
-  final rednessPenalty = ((skin.acneActivity ?? 0.0) * 0.3 + (skin.spotDensity ?? 0.0) * 0.2).clamp(0.0, 1.0);
-  final glossAdj = (0.8 * gloss + 0.2 * features.gloss).clamp(0.0, 1.0);
-  // 新指標があれば優先
-  final eyeB = (skin.eyeBrightness ?? eyeBrightness).clamp(0.0, 1.0);
-  final puff = (skin.jawPuffiness ?? puffiness).clamp(0.0, 1.0);
-  final mouth = features.mouthCorner().clamp(0.0, 1.0);
-  final luck =
-      0.25 * glossAdj + 0.20 * eyeB + 0.15 * mouth + 0.15 * (1.0 - rednessPenalty) + 0.15 * (1.0 - puff) + 0.10 * even;
-  return luck.clamp(0.0, 1.0);
+  final g = faceDiagnosisGloss(skin);
+  final m = faceDiagnosisMoisture(skin);
+  final b = faceDiagnosisBloodTone(skin);
+  return ((g + m + b) / 3.0).clamp(0.0, 1.0);
 }
 
 /// 肌質分析を行うクラス
@@ -614,8 +677,21 @@ class SkinAnalyzer {
         wrinkleDensity = 0.2;
       }
 
-      // 高度指標（ランドマーク使用）
-      final adv = _advancedMetrics(image, face);
+      // 高度指標（ランドマーク使用）— 輪郭欠損や極小顔領域で例外になり得るため常にフォールバック
+      Map<String, double> adv;
+      try {
+        adv = _advancedMetrics(image, face);
+      } catch (e, st) {
+        print('[SkinAnalyzer] ⚠️ _advancedMetrics スキップ: $e');
+        print('[SkinAnalyzer] ${st.toString().split("\n").take(4).join("\n")}');
+        adv = {
+          'eyeBrightness': 0.6,
+          'darkCircle': 0.35,
+          'browBalance': 0.6,
+          'noseGloss': 0.5,
+          'jawPuffiness': 0.35,
+        };
+      }
       final eyeBrightness = adv['eyeBrightness'];
       var darkCircle = adv['darkCircle']; // AI補正のためvarに変更
       final browBalance = adv['browBalance'];
@@ -674,10 +750,24 @@ class SkinAnalyzer {
       final jawPuf = _calibrate(jawPuffiness ?? 0.3,
           cap: SkinCalibConfig.capPuff, floor: SkinCalibConfig.floorMid, gamma: SkinCalibConfig.gammaSoft);
 
-      // 既存の課題検出に数値指標を反映
-      var skinIssues = await _detectSkinIssues(faceRegion,
-          dullnessIndex: dullnessIndex, spotDensity: spotDensity, acneActivity: acneActivity);
-      final regionAnalysis = _analyzeRegions(faceRegion, face);
+      // 既存の課題検出に数値指標を反映（内部で再推定を呼ぶため失敗し得る）
+      var skinIssues = <String>[];
+      try {
+        skinIssues = await _detectSkinIssues(faceRegion,
+            dullnessIndex: dullnessIndex, spotDensity: spotDensity, acneActivity: acneActivity);
+      } catch (e, st) {
+        print('[SkinAnalyzer] ⚠️ _detectSkinIssues スキップ: $e');
+        print('[SkinAnalyzer] ${st.toString().split("\n").take(4).join("\n")}');
+        skinIssues = [];
+      }
+      Map<String, double> regionAnalysis;
+      try {
+        regionAnalysis = _analyzeRegions(faceRegion, face);
+      } catch (e, st) {
+        print('[SkinAnalyzer] ⚠️ _analyzeRegions スキップ: $e');
+        print('[SkinAnalyzer] ${st.toString().split("\n").take(4).join("\n")}');
+        regionAnalysis = {'額': 0.5, '頬': 0.5, '鼻': 0.5, '顎': 0.5};
+      }
 
       // 肌タイプを判定（既存ロジック）
       var skinType = _determineSkinType(oiliness, smoothness, uniformity);
@@ -862,9 +952,8 @@ class SkinAnalyzer {
           firmnessScore = (smoothness * 0.5 + (firmness! / 100.0) * 0.5).clamp(0.0, 1.0);
         }
         // toneScore（色ムラ）: evennessとuniformityから計算
-        if (evenness != null) {
-          toneScore = ((evenness! / 100.0) * 0.6 + uniformity * 0.4).clamp(0.0, 1.0);
-        }
+        final evForTone = evenness ?? 50.0;
+        toneScore = ((evForTone / 100.0) * 0.6 + uniformity * 0.4).clamp(0.0, 1.0);
       } catch (e) {
         // エラー時は既存の値を保持
       }
@@ -945,10 +1034,10 @@ class SkinAnalyzer {
         shineScore: shineScore, // 艶スコア
         firmnessScore: firmnessScore, // 張りスコア
         toneScore: toneScore, // 色ムラスコア
-        dryness: dryness!, // 乾燥（0-100）- nullチェック済み
+        dryness: dryness ?? 50.0, // 乾燥（0-100）— 念のため非null化（! は解析途中の取りこぼしで例外化する）
         redness: redness ?? 30.0, // 赤み（0-100）- デフォルト値30.0
-        texture: texture!, // キメ/テクスチャ（0-100）- nullチェック済み
-        evenness: evenness!, // 透明感/色ムラ（0-100）- nullチェック済み
+        texture: texture ?? 50.0, // キメ/テクスチャ（0-100）
+        evenness: evenness ?? (uniformity * 100.0).clamp(0.0, 100.0), // 透明感/色ムラ（0-100）
         firmness: firmness ?? 50.0, // ハリ・弾力（0-100）- デフォルト値50.0
         acne: acne ?? 20.0, // ニキビ・炎症（0-100）- デフォルト値20.0
         // 【G】raw値を保存（キャリブレーション前）
@@ -1977,13 +2066,17 @@ class SkinAnalyzer {
   static Map<String, double> _analyzeRegions(img.Image faceRegion, Face face) {
     final width = faceRegion.width;
     final height = faceRegion.height;
+    // height~/3 や width~/3 が 0 になると copyCrop が例外になり「画像分析中にエラー」につながる
+    final thirdH = math.max(1, height ~/ 3);
+    final thirdW = math.max(1, width ~/ 3);
+    final y2 = math.min(2 * height ~/ 3, math.max(0, height - thirdH));
 
     return {
-      '額': _analyzeOiliness(img.copyCrop(faceRegion, x: 0, y: 0, width: width, height: height ~/ 3)),
-      '頬': _analyzeOiliness(img.copyCrop(faceRegion, x: 0, y: height ~/ 3, width: width, height: height ~/ 3)),
+      '額': _analyzeOiliness(img.copyCrop(faceRegion, x: 0, y: 0, width: width, height: thirdH)),
+      '頬': _analyzeOiliness(img.copyCrop(faceRegion, x: 0, y: height ~/ 3, width: width, height: thirdH)),
       '鼻': _analyzeOiliness(
-          img.copyCrop(faceRegion, x: width ~/ 3, y: height ~/ 3, width: width ~/ 3, height: height ~/ 3)),
-      '顎': _analyzeOiliness(img.copyCrop(faceRegion, x: 0, y: 2 * height ~/ 3, width: width, height: height ~/ 3)),
+          img.copyCrop(faceRegion, x: width ~/ 3, y: height ~/ 3, width: thirdW, height: thirdH)),
+      '顎': _analyzeOiliness(img.copyCrop(faceRegion, x: 0, y: y2, width: width, height: thirdH)),
     };
   }
 

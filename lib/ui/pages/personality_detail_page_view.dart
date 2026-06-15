@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:kami_face_oracle/models/personality_type_detail.dart';
 import 'package:kami_face_oracle/services/personality_type_detail_service.dart';
-import 'package:kami_face_oracle/services/background_music_service.dart';
-import 'package:kami_face_oracle/ui/pages/pillar_chat_page.dart';
+import 'package:kami_face_oracle/services/pillar_interaction_seed_store.dart';
+import 'package:kami_face_oracle/ui/pages/main_tab_shell.dart';
 
 /// 性格診断結果の詳細を1項目ずつ表示するページ
 class PersonalityDetailPageView extends StatefulWidget {
@@ -70,7 +70,6 @@ class _PersonalityDetailPageViewState extends State<PersonalityDetailPageView> {
       if (detail != null) {
         print('[PersonalityDetailPageView] 詳細を読み込み完了: pillarId=${detail.pillarId}');
         _currentPillarId = detail.pillarId;
-        await _initBackgroundMusic();
       } else {
         print('[PersonalityDetailPageView] ⚠️ 詳細の読み込みに失敗しました');
       }
@@ -85,22 +84,38 @@ class _PersonalityDetailPageViewState extends State<PersonalityDetailPageView> {
     }
   }
 
-  Future<void> _initBackgroundMusic() async {
-    try {
-      // 各柱の瞑想音楽を再生（ホーム画面でも継続するため、BackgroundMusicServiceに登録）
-      final pillarId = (widget.pillarId ?? _detail?.pillarId ?? '').toLowerCase();
-      print(
-          '[PersonalityDetailPageView] 瞑想音楽を再生: pillarId=$pillarId (widget.pillarId=${widget.pillarId}, detail.pillarId=${_detail?.pillarId})');
-
-      if (pillarId.isNotEmpty) {
-        // BackgroundMusicServiceに瞑想音楽を登録（ホーム画面でも継続）
-        // 既に同じ音楽が再生中の場合は何もしない（重複再生を防ぐ）
-        await BackgroundMusicService().playMeditationMusic(pillarId);
-      }
-    } catch (e) {
-      print('[PersonalityDetailPageView] BGM初期化エラー: $e');
-      // BGMファイルがない場合は無音で続行
+  Future<void> _openConsultationChat() async {
+    final detail = _detail;
+    if (detail == null) {
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(builder: (_) => const MainTabShell(initialIndex: 1)),
+        (route) => false,
+      );
+      return;
     }
+
+    final seeds = <PillarInteractionSeed>[];
+    for (final entry in detail.orderedSections) {
+      final section = entry.value;
+      seeds.add(PillarInteractionSeed(
+        from: 'pillar',
+        text: '${section.title}\n\n${section.content}',
+      ));
+    }
+    seeds.add(
+      const PillarInteractionSeed(
+        from: 'pillar',
+        text: '隠占として降臨した柱に占ってほしいことや、悩みを相談したいことがあれば、下の欄から送ってください。'
+            '柱の性格とあなたの性格を踏まえ、創始者（人間）が柱を通じてお答えします。例：今年の運勢、今の問題の解決のヒント など',
+      ),
+    );
+    await PillarInteractionSeedStore.setAll(seeds);
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => const MainTabShell(initialIndex: 1)),
+      (route) => false,
+    );
   }
 
   @override
@@ -552,16 +567,7 @@ class _PersonalityDetailPageViewState extends State<PersonalityDetailPageView> {
                   curve: Curves.easeInOut,
                 );
               } else {
-                // 最後のページ：チャットページへ遷移
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PillarChatPage(
-                      personalityType: widget.personalityType,
-                      pillarId: widget.pillarId,
-                    ),
-                  ),
-                );
+                unawaited(_openConsultationChat());
               }
             },
             icon: Icon(

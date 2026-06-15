@@ -1,0 +1,25 @@
+appId: com.auraface.kami_face_oracle
+---
+# 年齢確認（初回起動）
+- runFlow:
+    when:
+      visible: "I am 18 or older"
+    commands:
+      - tapOn: "I am 18 or older"
+# Cookie 同意（EU/UK 相当リージョン）
+- runFlow:
+    when:
+      visible: "Accept all"
+    commands:
+      - tapOn: "Accept all"
+# 通知許可ダイアログ（Android 13+）
+- runFlow:
+    when:
+      visible: "Allow"
+    commands:
+      - tapOn: "Allow"
+- runFlow:
+    when:
+      visible: "許可"
+    commands:
+      - tapOn: "許可"

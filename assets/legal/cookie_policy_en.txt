@@ -1,0 +1,15 @@
+AURAFACE COOKIE POLICY
+Last Updated: [YYYY-MM-DD]
+
+We use cookies and similar technologies to:
+- keep you signed in and secure the Service (Strictly Necessary)
+- measure performance and reliability (Analytics, where consent is required)
+- remember your preferences (Functional)
+
+Where required by law (e.g., EU/UK), we request your consent for non-essential cookies. You can change your preferences at any time via [Cookie Settings].
+
+We do not use third-party advertising cookies without opt-in consent.
+
+Cookie banner (display text):
+We use cookies to operate the Service. You can accept all, reject non-essential cookies, or manage preferences.
+[Accept all] [Reject non-essential] [Manage preferences]

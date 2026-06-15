@@ -84,8 +84,8 @@ Flutter 側の文字列定義: `lib/config/consultation_mail_types.dart`
 | `lib/ui/pages/consultation_page.dart` | **メイン占い相談 UI**・送信・SnackBar（サーバー応答と至急の不一致警告） |
 | `lib/ui/pages/consultation_page_new.dart` | メールベース相談（別フロー、同じ mail service） |
 | `lib/ui/pages/consultation_mail_bridge_test_page.dart` | 開発用接続テスト・手動送信 |
-| `lib/ui/pages/developer_chat_page.dart` | 開発者返信・追記（スレッド先頭 user の `consultationType` を優先） |
-| `lib/ui/pages/pillar_chat_page.dart` | 柱チャットからの開発者通知（種別は通常固定） |
+| `lib/ui/pages/developer_chat_page.dart` | 創設者（占い師）返信・追記（スレッド先頭 user の `consultationType` を優先） |
+| `lib/ui/pages/pillar_chat_page.dart` | 柱チャットからの創設者（占い師）通知（種別は通常固定） |
 | `lib/ui/pages/home_page.dart` | 占い相談・テストページへの遷移 |
 | `lib/app_widgets.dart` | E2E 時のみ `ConsultationPage` をホームにする分岐 |
 | `lib/services/remote_config_service.dart` | コスト等 Remote Config（**メールブリッジ URL の上書きは行わない**） |
@@ -159,9 +159,9 @@ Flutter 側の文字列定義: `lib/config/consultation_mail_types.dart`
 |------|----------|-------------------|------------------------------|------------------|
 | 占い相談（メイン） | `consultation_page.dart` | `consultation_page` | ボタン: 至急→`priority_guidance`、通常→`normal`（`ConsultationSendContract`） | **ホーム**「占い相談」→ `ConsultationPage`（`home_page.dart`）。E2E 時は `app_widgets.dart` でホーム直開きも同画面 |
 | 占い相談（新UI） | `consultation_page_new.dart` | `consultation_page_new` | 同上 | 現状 `Navigator` からの参照なし（コード上は未接続の別画面） |
-| 開発者チャット追記 | `developer_chat_page.dart` | `developer_chat_follow_up` | **スレッド先頭 user の `consultationType`**（無ければ Pref） | 占い相談送信後に保存された `chatId` から遷移した追記のみ |
-| 柱チャット（チュートリアル） | `pillar_chat_page.dart` | `pillar_chat_tutorial` | 常に `normal` | 性格詳細などから `PillarChatPage` を開いたときの開発者通知 |
-| ブリッジテスト | `consultation_mail_bridge_test_page.dart` | `consultation_mail_bridge_test_page` | テスト用（主に `normal`） | ホーム等からテストページを開いた開発者向け |
+| 創設者（占い師）チャット追記 | `developer_chat_page.dart` | `developer_chat_follow_up` | **スレッド先頭 user の `consultationType`**（無ければ Pref） | 占い相談送信後に保存された `chatId` から遷移した追記のみ |
+| 柱チャット（チュートリアル） | `pillar_chat_page.dart` | `pillar_chat_tutorial` | 常に `normal` | 性格詳細などから `PillarChatPage` を開いたときの創設者（占い師）通知 |
+| ブリッジテスト | `consultation_mail_bridge_test_page.dart` | `consultation_mail_bridge_test_page` | テスト用（主に `normal`） | ホーム等からテストページを開いた創設者（占い師）向け |
 
 **実機ユーザーが「通常／至急」を選ぶのは基本的に `ConsultationPage` のみ**（`consultation_page_new` は未配線なら到達しない）。
 

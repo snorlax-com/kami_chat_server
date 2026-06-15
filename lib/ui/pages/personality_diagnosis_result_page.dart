@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/core/deities.dart';
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
 import 'package:kami_face_oracle/core/personality_tree_classifier.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
 import 'package:kami_face_oracle/services/background_music_service.dart';
@@ -12,21 +13,28 @@ import 'package:kami_face_oracle/services/guest_session_service.dart';
 import 'package:kami_face_oracle/services/personality_type_detail_service.dart';
 import 'package:kami_face_oracle/services/tutorial_diagnosis_local_store.dart';
 import 'package:kami_face_oracle/ui/pages/personality_detail_page_view.dart';
-import 'package:kami_face_oracle/ui/widgets/auraface_auth_sheet.dart';
+import 'package:kami_face_oracle/services/auraface_auth_service.dart';
+import 'package:kami_face_oracle/ui/widgets/tutorial_guest_exit_actions.dart';
+import 'package:kami_face_oracle/ui/widgets/tutorial_guest_exit_scope.dart';
 
 class PersonalityDiagnosisResultPage extends StatefulWidget {
   final PersonalityTreeDiagnosisResult diagnosisResult;
 
+  /// チュートリアル撮影直後の結果画面（戻るで終了確認を必ず出す）。
+  final bool isTutorialFlow;
+
   const PersonalityDiagnosisResultPage({
     super.key,
     required this.diagnosisResult,
+    this.isTutorialFlow = false,
   });
 
   @override
   State<PersonalityDiagnosisResultPage> createState() => _PersonalityDiagnosisResultPageState();
 }
 
-class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisResultPage> {
+class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisResultPage>
+    with WidgetsBindingObserver {
   String? _pillarId;
   String? _displayTypeName;
   String? _characterImagePath;
@@ -37,6 +45,9 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
 
   bool _detailUnlocked = false;
   bool _tutorialPosted = false;
+  bool _isOpeningDetail = false;
+  int _loginAttemptId = 0;
+  bool _loginUiWasBackgrounded = false;
   StreamSubscription<User?>? _authSub;
 
   PersonalityTreeDiagnosisResult get _effective =>
@@ -44,9 +55,23 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
 
   bool get _showGuestLock => !_detailUnlocked;
 
+  /// 未ログインで詳細ロック中（チュートリアル直後・保存診断の再表示を含む）。
+  bool get _isGuestLockedFlow =>
+      _showGuestLock && TutorialGuestExitActions.shouldConfirmExit(tutorialFlow: widget.isTutorialFlow);
+
+  /// チュートリアル直後かつ未ログインのときだけ終了確認ダイアログを出す。
+  bool get _needsTutorialGuestExitGuard =>
+      widget.isTutorialFlow && _isGuestLockedFlow;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // ignore: avoid_print
+    print(
+      '[GuestExit] PersonalityDiagnosisResultPage init '
+      'tutorialFlow=${widget.isTutorialFlow} guard=$_needsTutorialGuestExitGuard',
+    );
     _loadPillarIdAndPlayMusic();
     _loadDisplayTypeName();
     // google-services 未設定時は FirebaseAuth が使えない
@@ -60,11 +85,48 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _authSub?.cancel();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isOpeningDetail &&
+        (state == AppLifecycleState.inactive || state == AppLifecycleState.paused)) {
+      _loginUiWasBackgrounded = true;
+    }
+    if (state == AppLifecycleState.resumed && _loginUiWasBackgrounded) {
+      _loginUiWasBackgrounded = false;
+      final attemptAtResume = _loginAttemptId;
+      Future<void>.delayed(const Duration(milliseconds: 600), () {
+        if (!mounted) return;
+        if (attemptAtResume != _loginAttemptId) return;
+        if (!_isOpeningDetail || !_showGuestLock) return;
+        unawaited(_cancelGuestLoginAttempt());
+      });
+    }
+  }
+
+  bool _isLoginAttemptCurrent(int attemptId) => mounted && attemptId == _loginAttemptId;
+
+  Future<void> _cancelGuestLoginAttempt() async {
+    _loginAttemptId++;
+    debugPrint('[PersonalityDiagnosis] cancel guest login attempt=$_loginAttemptId');
+    if (mounted) setState(() => _isOpeningDetail = false);
+    unawaited(AurafaceAuthService.abortPendingGoogleSignIn());
+  }
+
   Future<void> _bootstrap() async {
+    if (widget.isTutorialFlow) {
+      try {
+        await TutorialDiagnosisLocalStore.persistTutorialResult(_effective);
+        debugPrint('[PersonalityDiagnosis] tutorial result persisted locally');
+      } catch (e) {
+        debugPrint('[PersonalityDiagnosis] tutorial persist failed: $e');
+        await TutorialDiagnosisLocalStore.markTutorialConsumed();
+      }
+    }
     final fromPrefs = await TutorialDiagnosisLocalStore.isUnlocked();
     if (fromPrefs && mounted) {
       setState(() => _detailUnlocked = true);
@@ -156,6 +218,7 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
     if (_tutorialPosted) return;
     _tutorialPosted = true;
     try {
+      await TutorialDiagnosisLocalStore.persistTutorialResult(_effective);
       final gid = await GuestSessionService.ensureGuestSessionId();
       await DiagnosisApiService.saveTutorialDiagnosis(
         guestSessionId: gid,
@@ -163,7 +226,6 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
         summaryText: 'あなたの柱が降臨しました',
         detailJson: _effective.toJson(),
       );
-      await TutorialDiagnosisLocalStore.saveResultJson(jsonEncode(_effective.toJson()));
     } catch (e) {
       debugPrint('[PersonalityDiagnosisResultPage] tutorial API: $e');
     }
@@ -188,82 +250,164 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
     );
   }
 
-  Future<void> _openAuthAndClaim() async {
-    if (!CloudService.isFirebaseAppReady) {
-      await _unlockLocallyWithoutFirebase();
-      if (mounted) await _openDetailPage();
-      return;
-    }
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF1A1F3A),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-        child: AurafaceAuthSheet(
-          onAuthenticated: (user) async {
-            Navigator.of(ctx).pop();
-            await _runClaim(user);
-          },
-        ),
-      ),
-    );
+  void _resetGuestLoginUiState() {
+    if (mounted) setState(() => _isOpeningDetail = false);
   }
 
-  Future<void> _runClaim(User user) async {
+  Future<void> _popGuestResultWithoutLogin() async {
+    _resetGuestLoginUiState();
+    if (!mounted) return;
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _exitWithoutLoginFromResultPage() async {
+    if (widget.isTutorialFlow) {
+      _resetGuestLoginUiState();
+      await TutorialGuestExitActions.finishWithoutLogin(context);
+      return;
+    }
+    await _popGuestResultWithoutLogin();
+  }
+
+  /// Google ログイン → claim。成功時は [_detailUnlocked] が true。
+  Future<bool> _loginWithGoogleAndClaim({bool showSuccessSnack = true}) async {
+    debugPrint('[PersonalityDiagnosis] loginAndClaim start');
+    if (!IntegrationTestFlags.hasGoogleSignInHang && !CloudService.isFirebaseAppReady) {
+      await _unlockLocallyWithoutFirebase();
+      return _detailUnlocked;
+    }
     try {
-      final token = await user.getIdToken();
-      final gid = await GuestSessionService.readStoredId();
-      if (token == null || gid == null || gid.isEmpty) {
-        throw Exception('セッション情報が不足しています');
+      // ログイン UI 表示前に guest_session_id を確保（claim 時の「セッション不足」防止）
+      await GuestSessionService.ensureGuestSessionId();
+      final cred = await AurafaceAuthService.signInWithGoogle().timeout(
+        const Duration(seconds: 60),
+        onTimeout: () {
+          throw TimeoutException('Google ログインがタイムアウトしました');
+        },
+      );
+      final user = cred.user;
+      if (user == null) {
+        debugPrint('[PersonalityDiagnosis] loginAndClaim: no user');
+        return false;
       }
-      await DiagnosisApiService.claimGuestData(guestSessionId: gid, idToken: token);
-      await TutorialDiagnosisLocalStore.setUnlocked(true);
+      debugPrint('[PersonalityDiagnosis] loginAndClaim: google ok');
+      await _runClaim(user, showSuccessSnack: showSuccessSnack);
+      return _detailUnlocked;
+    } on TimeoutException catch (e) {
+      debugPrint('[PersonalityDiagnosis] loginAndClaim: timeout $e');
       if (mounted) {
-        setState(() => _detailUnlocked = true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('診断結果をアカウントに保存しました。詳細を表示します。'),
-            backgroundColor: Colors.green,
+            content: Text('ログインがタイムアウトしました。もう一度お試しください。'),
+            backgroundColor: Color(0xFF92400E),
           ),
         );
       }
-    } catch (e) {
-      if (!mounted) return;
-      final s = e.toString();
-      // 本番 Render が古く identity API が無いとき claim が 404 になる（ログで多発）
-      final isServerIdentityUnavailable = s.contains('claim failed: 404') ||
-          s.contains('claim failed: 502') ||
-          s.contains('claim failed: 503') ||
-          s.contains('Cannot POST /api/auth/claim-guest-data');
-      if (isServerIdentityUnavailable) {
-        try {
-          await TutorialDiagnosisLocalStore.saveResultJson(jsonEncode(_effective.toJson()));
-        } catch (_) {}
-        await TutorialDiagnosisLocalStore.setUnlocked(true);
-        if (!mounted) return;
-        setState(() => _detailUnlocked = true);
+      return false;
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'aborted-by-user') {
+        debugPrint('[PersonalityDiagnosis] loginAndClaim: cancelled');
+        return false;
+      }
+      debugPrint('[PersonalityDiagnosis] loginAndClaim auth error: ${e.code}');
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'ログインは成功しました。サーバーに診断保存APIがまだ無いため、この端末のみで詳細を表示します。'
-              '（kami_chat_server を再デプロイするとクラウド保存できます）',
-            ),
-            backgroundColor: Color(0xFF92400E),
-            duration: Duration(seconds: 12),
+          SnackBar(
+            content: Text(e.message ?? 'ログインに失敗しました'),
+            backgroundColor: Colors.red.shade800,
           ),
+        );
+      }
+      return false;
+    } catch (e) {
+      debugPrint('[PersonalityDiagnosis] loginAndClaim failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('ログインに失敗しました: $e'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<void> _unlockDetailAfterLogin({
+    required bool showSuccessSnack,
+    required String snackMessage,
+    Color snackColor = Colors.green,
+    Duration snackDuration = const Duration(seconds: 5),
+  }) async {
+    try {
+      await TutorialDiagnosisLocalStore.saveResultJson(jsonEncode(_effective.toJson()));
+    } catch (_) {}
+    await TutorialDiagnosisLocalStore.setUnlocked(true);
+    if (!mounted) return;
+    setState(() => _detailUnlocked = true);
+    if (showSuccessSnack) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(snackMessage),
+          backgroundColor: snackColor,
+          duration: snackDuration,
+        ),
+      );
+    }
+  }
+
+  Future<void> _runClaim(User user, {bool showSuccessSnack = true}) async {
+    try {
+      final token = await user.getIdToken();
+      if (token == null || token.isEmpty) {
+        throw Exception('認証トークンを取得できませんでした');
+      }
+      final gid = await GuestSessionService.ensureGuestSessionId();
+
+      if (gid.startsWith('guest_local_')) {
+        await _unlockDetailAfterLogin(
+          showSuccessSnack: showSuccessSnack,
+          snackMessage: 'ログインしました。オフラインのため診断結果はこの端末に保存されます。',
+          snackColor: const Color(0xFF92400E),
+          snackDuration: const Duration(seconds: 8),
         );
         return;
       }
-      final isUnauthorized =
-          s.contains('401') || s.toLowerCase().contains('unauthorized');
-      final msg = isUnauthorized
-          ? 'Google ログインは成功しましたが、サーバーが Firebase トークンを検証できませんでした。'
-              'kami_chat_server に FIREBASE_SERVICE_ACCOUNT_JSON（サービスアカウント JSON）を設定して再デプロイしてください。'
-          : '保存に失敗しました: $e';
+
+      await DiagnosisApiService.claimGuestData(guestSessionId: gid, idToken: token);
+      await _unlockDetailAfterLogin(
+        showSuccessSnack: showSuccessSnack,
+        snackMessage: '診断結果をアカウントに保存しました。',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final s = e.toString();
+      final isRecoverable = s.contains('claim failed: 404') ||
+          s.contains('claim failed: 502') ||
+          s.contains('claim failed: 503') ||
+          s.contains('claim failed: 400') ||
+          s.contains('Cannot POST /api/auth/claim-guest-data') ||
+          s.contains('TimeoutException') ||
+          s.contains('SocketException') ||
+          s.contains('Failed host lookup') ||
+          s.contains('Connection refused') ||
+          s.contains('401') ||
+          s.toLowerCase().contains('unauthorized');
+      if (isRecoverable) {
+        final msg = s.contains('401') || s.toLowerCase().contains('unauthorized')
+            ? 'ログインしました。サーバー連携は未設定のため、この端末で詳細を表示します。'
+            : 'ログインしました。クラウド保存はできませんでしたが、この端末で詳細を表示します。';
+        await _unlockDetailAfterLogin(
+          showSuccessSnack: showSuccessSnack,
+          snackMessage: msg,
+          snackColor: const Color(0xFF92400E),
+          snackDuration: const Duration(seconds: 10),
+        );
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(msg),
+          content: Text('保存に失敗しました: $e'),
           backgroundColor: Colors.red.shade800,
           duration: const Duration(seconds: 12),
         ),
@@ -279,20 +423,57 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
     return 'タイプ ${_effective.personalityType}';
   }
 
-  Future<void> _openDetailPage() async {
-    if (_showGuestLock) {
-      await _openAuthAndClaim();
+  Future<void> _handleGuestBackOrExit({bool forcePrompt = false}) async {
+    if (_isOpeningDetail) {
+      await _cancelGuestLoginAttempt();
       return;
     }
+    // ignore: avoid_print
+    print(
+      '[GuestExit] result page back tap guestLock=$_showGuestLock '
+      'guard=$_needsTutorialGuestExitGuard unlocked=$_detailUnlocked force=$forcePrompt',
+    );
+    if (forcePrompt) {
+      TutorialGuestExitActions.clearBusyForExplicitExit();
+      TutorialGuestExitActions.dismissExitDialogIfOpen();
+    }
+    if (_needsTutorialGuestExitGuard) {
+      await TutorialGuestExitActions.promptExitIfNeeded(
+        context,
+        tutorialFlow: widget.isTutorialFlow,
+        forcePrompt: forcePrompt,
+        onLogin: () async {
+          final attemptId = ++_loginAttemptId;
+          if (mounted) setState(() => _isOpeningDetail = true);
+          try {
+            await _loginWithGoogleAndClaim();
+          } finally {
+            if (_isLoginAttemptCurrent(attemptId)) {
+              _resetGuestLoginUiState();
+            }
+          }
+        },
+        onExitWithoutLogin: _exitWithoutLoginFromResultPage,
+      );
+      return;
+    }
+    if (_isGuestLockedFlow) {
+      await _popGuestResultWithoutLogin();
+      return;
+    }
+    if (mounted) Navigator.of(context).maybePop();
+  }
+
+  Future<void> _pushDetailPage() async {
     if (_pillarId == null) {
       await _loadPillarIdAndPlayMusic();
     }
     if (!mounted) return;
-    // pillarId は詳細JSONから再取得（非同期完了前にタップした場合の null 防止）
     final pillarForDetail = _pillarId ??
         (await PersonalityTypeDetailService.getDetail(_effective.personalityType))?.pillarId;
     if (!mounted) return;
-    Navigator.push(
+    debugPrint('[PersonalityDiagnosis] push detail type=${_effective.personalityType}');
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => PersonalityDetailPageView(
@@ -304,28 +485,85 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
     );
   }
 
+  Future<void> _openDetailPage() async {
+    if (_isOpeningDetail) return;
+    final attemptId = ++_loginAttemptId;
+    setState(() => _isOpeningDetail = true);
+    try {
+      if (_showGuestLock) {
+        final unlocked = await _loginWithGoogleAndClaim(showSuccessSnack: false);
+        if (!_isLoginAttemptCurrent(attemptId)) return;
+        if (!unlocked) return;
+      }
+      if (!_isLoginAttemptCurrent(attemptId)) return;
+      await _pushDetailPage();
+    } finally {
+      if (_isLoginAttemptCurrent(attemptId)) {
+        setState(() => _isOpeningDetail = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final typeLabel = _personalityTypeNameForDetail();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('性格診断結果'),
-        flexibleSpace: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                const Color(0xFF8B5CF6).withOpacity(0.3),
-                const Color(0xFF06B6D4).withOpacity(0.2),
-                const Color(0xFF0A0E1A),
-              ],
+    return TutorialGuestExitScope(
+      enabled: _isGuestLockedFlow,
+      tutorialFlow: widget.isTutorialFlow,
+      onLogin: () async {
+        final attemptId = ++_loginAttemptId;
+        if (mounted) setState(() => _isOpeningDetail = true);
+        try {
+          await _loginWithGoogleAndClaim();
+        } finally {
+          if (_isLoginAttemptCurrent(attemptId)) {
+            _resetGuestLoginUiState();
+          }
+        }
+      },
+      onExitWithoutLogin: _exitWithoutLoginFromResultPage,
+      onBackRequested: () => unawaited(_handleGuestBackOrExit(forcePrompt: true)),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('性格診断結果'),
+          automaticallyImplyLeading: false,
+          leading: _isGuestLockedFlow
+              ? Semantics(
+                  identifier: 'maestro_guest_result_back',
+                  label: '戻る',
+                  button: true,
+                  child: IconButton(
+                    key: const Key('guest-result-back-button'),
+                    icon: const Icon(Icons.arrow_back),
+                    tooltip: '戻る',
+                    onPressed: () => unawaited(_handleGuestBackOrExit(forcePrompt: true)),
+                  ),
+                )
+              : Semantics(
+                  identifier: 'maestro_guest_result_back',
+                  label: '戻る',
+                  button: true,
+                  child: BackButton(
+                    key: const Key('guest-result-back-button'),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                ),
+          flexibleSpace: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  const Color(0xFF8B5CF6).withOpacity(0.3),
+                  const Color(0xFF06B6D4).withOpacity(0.2),
+                  const Color(0xFF0A0E1A),
+                ],
+              ),
             ),
           ),
         ),
-      ),
-      body: Stack(
+        body: Stack(
         children: [
           Positioned.fill(
             child: Container(
@@ -362,7 +600,7 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
                       if (_showGuestLock) ...[
                         _buildChatMessage(
                           message:
-                              '詳細な性格診断を開示するには、ログインまたはメールアドレス認証が必要です。\n\n認証後、診断結果は保存され、次回も同じ内容を確認できます。',
+                              '詳細な性格診断を開示するには、Google でログインが必要です。\n\n認証後、診断結果は保存され、次回も同じ内容を確認できます。',
                         ),
                         const SizedBox(height: 12),
                         _buildLockedCard(hint: '性格タイプの深掘り解説'),
@@ -404,16 +642,6 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_showGuestLock)
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _openAuthAndClaim,
-                          icon: const Icon(Icons.lock_open),
-                          label: const Text('診断結果を保存して続きを見る'),
-                        ),
-                      ),
-                    if (_showGuestLock) const SizedBox(height: 10),
                     Center(
                       child: Container(
                         decoration: BoxDecoration(
@@ -436,13 +664,25 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
                           ],
                         ),
                         child: ElevatedButton.icon(
-                          onPressed: _openDetailPage,
-                          icon: Icon(
-                            _showGuestLock ? Icons.login : Icons.auto_awesome,
-                            size: 24,
-                          ),
+                          key: const Key('guest-login-detail-button'),
+                          onPressed: _isOpeningDetail ? null : () => unawaited(_openDetailPage()),
+                          icon: _isOpeningDetail
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Icon(
+                                  _showGuestLock ? Icons.login : Icons.auto_awesome,
+                                  size: 24,
+                                ),
                           label: Text(
-                            _showGuestLock ? 'ログインして詳細を見る' : '詳しく見る',
+                            _isOpeningDetail
+                                ? '処理中…'
+                                : (_showGuestLock ? 'ログインして詳細を見る' : '詳しく見る'),
                             style: const TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.bold,
@@ -467,6 +707,7 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
             ],
           ),
         ],
+        ),
       ),
     );
   }

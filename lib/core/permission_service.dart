@@ -37,7 +37,7 @@ class PermissionService {
   static Future<void> showOpenSettingsDialog(
     BuildContext context, {
     String title = 'カメラの許可が必要です',
-    String message = '設定から「Kami Face Oracle」のカメラを許可してください。',
+    String message = '設定から「AuraFace」のカメラを許可してください。',
     String openLabel = '設定を開く',
     String laterLabel = 'あとで',
   }) async {

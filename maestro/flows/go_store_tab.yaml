@@ -1,0 +1,15 @@
+appId: com.auraface.kami_face_oracle
+---
+- runFlow: go_home_tab.yaml
+- tapOn: "ストア"
+- tapOn:
+    point: "50%,95%"
+    optional: true
+- extendedWaitUntil:
+    visible: "ストアはサブスクご加入中のみ"
+    timeout: 30000
+    optional: true
+- extendedWaitUntil:
+    visible: "月額サブスク"
+    timeout: 30000
+    optional: true

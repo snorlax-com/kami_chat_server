@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/core/deities.dart';
 import 'package:kami_face_oracle/ui/widgets/deity_card.dart';
-import 'package:kami_face_oracle/ui/pages/face_tutorial_screen.dart';
+import 'package:kami_face_oracle/ui/pages/tutorial_intro_page.dart';
 
 class TutorialYosenPage extends StatelessWidget {
   const TutorialYosenPage({super.key});
@@ -17,10 +17,11 @@ class TutorialYosenPage extends StatelessWidget {
             child: ElevatedButton.icon(
               key: const Key('e2e-start-face'),
               onPressed: () {
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const FaceTutorialScreen()));
+                // 顔認識・撮影フローは削除し、チュートリアル開始＝イントロ動画へ
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const TutorialIntroPage()));
               },
               icon: const Icon(Icons.face),
-              label: const Text('顔認識を開始'),
+              label: const Text('チュートリアルを開始'),
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 50),
               ),

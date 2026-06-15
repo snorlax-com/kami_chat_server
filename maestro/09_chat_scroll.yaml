@@ -1,0 +1,35 @@
+appId: com.auraface.kami_face_oracle
+---
+# 占い相談チャットの表示・スクロール
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/go_consultation_tab.yaml
+- assertVisible: "占い相談"
+- runFlow:
+    when:
+      visible: "サブスク: 加入中"
+    commands:
+      - tapOn:
+          text: "メッセージを入力（送信時に券1枚）"
+          optional: true
+      - inputText: "スクロール確認テスト"
+      - tapOn: "送信"
+      - extendedWaitUntil:
+          visible: "スクロール確認テスト"
+          timeout: 60000
+          optional: true
+      - scrollUntilVisible:
+          element:
+            text: "スクロール確認テスト"
+          direction: UP
+          optional: true
+- runFlow:
+    when:
+      notVisible: "サブスク: 加入中"
+    commands:
+      - assertVisible:
+          text: "メッセージを入力（送信時に券1枚）"
+          optional: true

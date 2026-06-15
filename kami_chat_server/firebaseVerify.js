@@ -196,10 +196,16 @@ function getFirebaseHealthSnapshot() {
   };
 }
 
+function getFirebaseAdmin() {
+  tryInitFirebaseAdmin();
+  return firebaseReady ? admin : null;
+}
+
 module.exports = {
   verifyBearerToken,
   resolveUserFromRequest,
   isFirebaseConfigured,
   tryInitFirebaseAdmin: tryInitFirebaseAdmin,
   getFirebaseHealthSnapshot,
+  getFirebaseAdmin,
 };

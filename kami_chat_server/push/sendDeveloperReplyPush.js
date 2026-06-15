@@ -5,14 +5,14 @@ const { getFirebaseAdmin, isFirebaseConfigured } = require("../firebaseVerify");
 const fcmTokens = require("./fcmTokens");
 
 const TITLE = "AuraFaceから新しい導きが届きました";
-const BODY = "開発者から返信が届いています。タップして確認してください。";
+const BODY = "創設者（占い師）から返信が届いています。タップして確認してください。";
 
 /**
- * 開発者返信時にユーザー端末へ FCM を送信（ユーザー送信には呼ばない）。
+ * 創設者（占い師）返信時にユーザー端末へ FCM を送信（ユーザー送信には呼ばない）。
  *
  * @param {{ chatId: string, messageId: number|string, role?: string }} params
  */
-async function sendDeveloperReplyPush({ chatId, messageId, role }) {
+async function sendDeveloperReplyPush({ chatId, messageId, role, createdAt }) {
   if (role && role !== "dev") {
     return { skipped: true, reason: "not_dev_role" };
   }
@@ -57,6 +57,10 @@ async function sendDeveloperReplyPush({ chatId, messageId, role }) {
     chatId: cid,
     messageId: String(mid),
   };
+  const createdAtMs = Number(createdAt);
+  if (!Number.isNaN(createdAtMs) && createdAtMs > 0) {
+    data.createdAt = String(createdAtMs);
+  }
 
   let successCount = 0;
   let failureCount = 0;

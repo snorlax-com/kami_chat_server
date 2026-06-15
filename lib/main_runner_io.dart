@@ -1,71 +1,80 @@
-import 'dart:io';
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:kami_face_oracle/core/portrait_lock.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:kami_face_oracle/app_widgets.dart';
+import 'package:kami_face_oracle/bootstrap/deferred_startup.dart';
+import 'package:kami_face_oracle/bootstrap/opening_video_preload.dart';
+import 'package:kami_face_oracle/core/e2e.dart';
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
+import 'package:kami_face_oracle/app_navigation.dart';
+import 'package:kami_face_oracle/services/notification_launch_router.dart';
+import 'package:kami_face_oracle/services/push_notification_service.dart';
 import 'package:kami_face_oracle/services/guest_session_service.dart';
 import 'package:kami_face_oracle/services/remote_config_service.dart';
+import 'package:kami_face_oracle/services/billing_log.dart';
+import 'package:kami_face_oracle/services/billing_account_service.dart';
 import 'package:kami_face_oracle/services/iap_service.dart';
 import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/core/personality_mapping_table.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-const _intentChannel = MethodChannel('com.auraface.kami_face_oracle/intent');
+bool get _integrationTestConsultation => IntegrationTestFlags.bypassConsultationFirebaseAuth;
 
-Future<String?> _resolveAutoInputPathForAutoMode() async {
-  try {
-    final externalCacheDirs = await getExternalCacheDirectories();
-    if (externalCacheDirs != null && externalCacheDirs.isNotEmpty) {
-      for (final dir in externalCacheDirs) {
-        final f = File('${dir.path}/auto_input.png');
-        if (await f.exists()) return f.path;
-      }
-    }
-  } catch (_) {}
-  const candidates = [
-    '/storage/emulated/0/Android/data/com.auraface.kami_face_oracle/cache/auto_input.png',
-    '/sdcard/Android/data/com.auraface.kami_face_oracle/cache/auto_input.png',
-  ];
-  for (final p in candidates) {
-    final f = File(p);
-    if (await f.exists()) return f.path;
-  }
-  try {
-    final extra = await _intentChannel.invokeMethod<Map<dynamic, dynamic>>('getIntentExtra');
-    final path = extra?['image_path'] as String?;
-    if (path != null && path.isNotEmpty) {
-      final f = File(path);
-      if (await f.exists()) return f.path;
-    }
-  } catch (_) {}
-  return null;
+/// 占い相談の統合テストだけ [runApp] 前に初期化完了を待つ（メール送信に Firebase 等が必要）。
+/// カメラ E2E は疑似撮影のみなので待たず UI を先に出し、初期化はバックグラウンド継続。
+bool _awaitDeferredInitBeforeRunApp() {
+  return E2E.isEnabled && _integrationTestConsultation;
+}
+
+Future<void> _runDeferredInitIo() async {
+  await PushNotificationService.instance.ensureLocalReady();
+  await CloudService.init();
+  await PushNotificationService.instance.init();
+  await GuestSessionService.ensureGuestSessionId();
+  await RemoteConfigService.instance.init();
+  BillingLog.info('deferred init: starting IAP');
+  await BillingAccountService.init();
+  await IAPService.instance.init();
+  await BackgroundMusicService().initialize();
+  await PersonalityMappingTable.initialize();
 }
 
 Future<void> runAppAsync() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await CloudService.init();
-  await GuestSessionService.ensureGuestSessionId();
-  await RemoteConfigService.instance.init();
-  await IAPService.instance.init();
-  await BackgroundMusicService().initialize();
-  await PersonalityMappingTable.initialize();
-  await Hive.initFlutter();
-  await Hive.openBox<Map>('skin_daily_records');
+  // integration_test の prefs フラグは dart-define より先に読む
+  await IntegrationTestFlags.loadRuntimeFlags();
+  await lockPortraitOrientation();
 
-  bool intentAutoMode = false;
   try {
-    final extra = await _intentChannel.invokeMethod<Map<dynamic, dynamic>>('getIntentExtra');
-    intentAutoMode = (extra?['auto_mode'] as bool?) ?? false;
-  } catch (_) {}
-
-  if (intentAutoMode) {
-    final resolvedPath = await _resolveAutoInputPathForAutoMode();
-    if (resolvedPath != null) {
-      runApp(ProviderScope(child: AuraFaceAutoApp(initialImagePath: resolvedPath)));
-      return;
-    }
+    await Hive.initFlutter();
+  } catch (e, st) {
+    debugPrint('[Hive] initFlutter failed: $e\n$st');
   }
+
+  // 通知タップ起動: ローカル／FCM を runApp 前に検知してスプラッシュを省略
+  await PushNotificationService.instance.ensureLocalReady();
+  await PushNotificationService.instance.consumeColdStartNotificationTap();
+  await CloudService.init();
+  await PushNotificationService.instance.consumeFcmInitialMessageIfAny();
+
+  // 動画デコードと各種 init を runApp より前に待たず並列化し、黒い待ち時間を短くする。
+  OpeningVideoPreload.start();
+  DeferredStartup.begin(_runDeferredInitIo);
+
+  if (_awaitDeferredInitBeforeRunApp()) {
+    await DeferredStartup.awaitReady();
+  }
+
   runApp(const ProviderScope(child: AuraFaceApp()));
+
+  // 通知タップで chatId があるときだけ再遷移（スプラッシュ省略のみでは RootGate が既に占い相談を開く）
+  if (NotificationLaunchRouter.skipOpeningSplash && AppNavigation.hasPendingConsultationChat) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(AppNavigation.openConsultationChat());
+    });
+  }
 }

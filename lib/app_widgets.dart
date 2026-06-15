@@ -1,15 +1,23 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/core/e2e.dart';
-import 'package:kami_face_oracle/ui/pages/home_page.dart';
-import 'package:kami_face_oracle/ui/pages/capture_page.dart';
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
+import 'package:kami_face_oracle/app_navigation.dart';
+import 'package:kami_face_oracle/ui/pages/main_tab_shell.dart';
 import 'package:kami_face_oracle/ui/pages/tutorial_camera_page.dart';
-import 'package:kami_face_oracle/ui/pages/consultation_page.dart';
+import 'package:kami_face_oracle/ui/pages/developer_chat_page.dart';
+import 'package:kami_face_oracle/ui/pages/splash_video_page.dart';
 import 'package:kami_face_oracle/features/consent/widgets/age_gate_dialog.dart';
 import 'package:kami_face_oracle/services/background_music_service.dart';
+import 'package:kami_face_oracle/services/developer_reply_notification_watchdog.dart';
+import 'package:kami_face_oracle/services/notification_launch_router.dart';
+import 'package:kami_face_oracle/services/push_notification_service.dart';
+import 'package:kami_face_oracle/core/portrait_lock.dart';
 
-/// 統合テストで占い相談メール送信テスト時に true（--dart-define=INTEGRATION_TEST_CONSULTATION=true）
-bool get _integrationTestConsultation =>
-    bool.fromEnvironment('INTEGRATION_TEST_CONSULTATION', defaultValue: false);
+/// 統合テストで占い相談メール送信テスト時に true
+bool get _integrationTestConsultation => IntegrationTestFlags.bypassConsultationFirebaseAuth;
 
 /// MaterialApp とルートウィジェット（main の runner から参照）
 class AuraFaceApp extends StatelessWidget {
@@ -19,48 +27,50 @@ class AuraFaceApp extends StatelessWidget {
   Widget build(BuildContext context) {
     // 統合テスト: 占い相談画面を直接表示（メール送信テスト用）
     if (E2E.isEnabled && _integrationTestConsultation) {
-      return MaterialApp(
-        title: 'Face Oracle',
-        theme: _mysticTheme,
-        debugShowCheckedModeBanner: false,
-        home: const ConsultationPage(),
+      return PortraitLockScope(
+        child: MaterialApp(
+          navigatorKey: appNavigatorKey,
+          title: 'AuraFace',
+          theme: _mysticTheme,
+          debugShowCheckedModeBanner: false,
+          home: const DeveloperChatPage(),
+        ),
       );
     }
     // E2E: ?e2e=1&route=camera でカメラ画面を直接表示（CanvasKit で DOM にテキストが出ないためテストを安定化）
-    final useE2ECameraRoute =
-        E2E.isEnabled && (Uri.base.queryParameters['route'] == 'camera' || Uri.base.queryParameters['camera'] == '1');
-    return MaterialApp(
-      title: 'Face Oracle',
-      theme: _mysticTheme,
-      debugShowCheckedModeBanner: false,
-      home: useE2ECameraRoute
-          ? const TutorialCameraPage(currentStep: 'neutral', forceE2ESkipCamera: true)
-          : const RootGate(),
-    );
-  }
-}
-
-class AuraFaceAutoApp extends StatelessWidget {
-  final String initialImagePath;
-
-  const AuraFaceAutoApp({super.key, required this.initialImagePath});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Face Oracle (Auto)',
-      theme: _mysticTheme,
-      debugShowCheckedModeBanner: false,
-      home: CapturePage(
-        autoMode: true,
-        initialImagePath: initialImagePath,
+    final useE2ECameraRoute = IntegrationTestFlags.cameraRoute ||
+        (E2E.isEnabled &&
+            (Uri.base.queryParameters['route'] == 'camera' ||
+                Uri.base.queryParameters['camera'] == '1'));
+    if (kDebugMode && E2E.isEnabled) {
+      debugPrint(
+        '[AuraFaceApp] E2E home route: '
+        'camera=$useE2ECameraRoute consultation=$_integrationTestConsultation',
+      );
+    }
+    return PortraitLockScope(
+      child: MaterialApp(
+        navigatorKey: appNavigatorKey,
+        title: 'AuraFace',
+        theme: _mysticTheme,
+        debugShowCheckedModeBanner: false,
+        home: useE2ECameraRoute
+            ? const TutorialCameraPage(currentStep: 'neutral', forceE2ESkipCamera: true)
+            : (E2E.isEnabled || NotificationLaunchRouter.skipOpeningSplash)
+                ? RootGate(
+                    initialTabIndex: NotificationLaunchRouter.skipOpeningSplash ? 1 : 0,
+                  )
+                : const SplashVideoPage(next: RootGate()),
       ),
     );
   }
 }
 
 class RootGate extends StatefulWidget {
-  const RootGate({super.key});
+  const RootGate({super.key, this.initialTabIndex = 0});
+
+  /// 通知タップ起動時は 1（占い相談タブ）。
+  final int initialTabIndex;
 
   @override
   State<RootGate> createState() => _RootGateState();
@@ -82,6 +92,7 @@ class _RootGateState extends State<RootGate> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+    DeveloperReplyNotificationWatchdog.instance.onLifecycleChange(state);
     switch (state) {
       case AppLifecycleState.paused:
       case AppLifecycleState.inactive:
@@ -89,6 +100,7 @@ class _RootGateState extends State<RootGate> with WidgetsBindingObserver {
         break;
       case AppLifecycleState.resumed:
         BackgroundMusicService().resumeFromBackground();
+        unawaited(PushNotificationService.instance.syncTokenNow());
         break;
       case AppLifecycleState.detached:
         BackgroundMusicService().stop();
@@ -100,7 +112,9 @@ class _RootGateState extends State<RootGate> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return const AgeGateWrapper(child: HomePage());
+    return AgeGateWrapper(
+      child: MainTabShell(initialIndex: widget.initialTabIndex),
+    );
   }
 }
 

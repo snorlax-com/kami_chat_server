@@ -1,10 +1,27 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:kami_face_oracle/core/integration_test_flags.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 相談メールブリッジ用 userId。Firebase の実ユーザー（匿名以外）を必須にする。
 class ConsultationIdentity {
   ConsultationIdentity._();
+
+  static const integrationTestUid = 'integration_test_consultation_uid';
+
+  static bool get _bypassFirebaseForIntegrationTest =>
+      IntegrationTestFlags.bypassConsultationFirebaseAuth;
+
+  /// 送信 API 用 UID。統合テスト時は固定 UID を返す。
+  static Future<String?> resolveSendUserId(BuildContext context) async {
+    if (_bypassFirebaseForIntegrationTest) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_id', integrationTestUid);
+      return integrationTestUid;
+    }
+    final u = await requireFirebaseUserForConsultation(context);
+    return u?.uid;
+  }
 
   /// 送信可能なら [User]、匿名・未ログインなら SnackBar のみで null。
   static Future<User?> requireFirebaseUserForConsultation(BuildContext context) async {
@@ -14,7 +31,7 @@ class ConsultationIdentity {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              '相談を送るには、まず性格診断結果の画面で Google・Apple・メールのいずれかでログインしてください。',
+              '相談を送るには、まず性格診断結果の画面で Google でログインしてください。',
             ),
             duration: Duration(seconds: 8),
           ),
@@ -42,6 +59,11 @@ class ConsultationIdentity {
 
   /// ブリッジ API 用 ID（認証済みなら Firebase UID、それ以外は従来の prefs フォールバック）
   static Future<String> bridgeUserIdOrLegacy() async {
+    if (_bypassFirebaseForIntegrationTest) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_id', integrationTestUid);
+      return integrationTestUid;
+    }
     final u = FirebaseAuth.instance.currentUser;
     if (u != null && !u.isAnonymous) {
       final prefs = await SharedPreferences.getInstance();

@@ -1,5 +1,4 @@
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:kami_face_oracle/services/currency_service.dart';
 
 /// 占い相談の「通常相談券」「優先券」と、至急の1日枠（日本時間の日付で集計・最大5回/日）
 class ConsultationTicketService {
@@ -7,9 +6,26 @@ class ConsultationTicketService {
 
   static const _kNormal = 'consult_normal_tickets_v1';
   static const _kPriority = 'consult_priority_tickets_v1';
-  static const _kInit = 'consult_tickets_initialized_v1';
+  static const _kInitPrefix = 'consult_tickets_initialized_v1';
   static const _kUrgentDayJst = 'consult_urgent_slots_day_jst_v1';
   static const _kUrgentCount = 'consult_urgent_slots_count_v1';
+
+  static String _accountKey = 'guest';
+
+  static String _normalKey() => '${_kNormal}_$_accountKey';
+  static String _priorityKey() => '${_kPriority}_$_accountKey';
+  static String _initKey() => '${_kInitPrefix}_$_accountKey';
+
+  static Future<void> bindAccountKey(String accountKey) async {
+    _accountKey = accountKey.isNotEmpty ? accountKey : 'guest';
+  }
+
+  static Future<void> setBalances({required int normal, required int priority}) async {
+    await _ensureInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_normalKey(), normal.clamp(0, 1 << 20));
+    await prefs.setInt(_priorityKey(), priority.clamp(0, 1 << 20));
+  }
 
   /// 1回の通常相談で消費する券枚数
   static const int normalCostPerSend = 1;
@@ -34,30 +50,25 @@ class ConsultationTicketService {
 
   static Future<void> _ensureInitialized() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_kInit) == true) return;
+    if (prefs.getBool(_initKey()) == true) return;
 
-    final wallet = await CurrencyService.load();
-    var normal = (wallet['coins']! ~/ 20).clamp(0, 999);
-    var priority = (wallet['gems']! ~/ 5).clamp(0, 999);
-    if (normal == 0 && priority == 0) {
-      normal = 3;
-      priority = 2;
-    }
-    await prefs.setInt(_kNormal, normal);
-    await prefs.setInt(_kPriority, priority);
-    await prefs.setBool(_kInit, true);
+    const normal = 0;
+    const priority = 0;
+    await prefs.setInt(_normalKey(), normal);
+    await prefs.setInt(_priorityKey(), priority);
+    await prefs.setBool(_initKey(), true);
   }
 
   static Future<int> normalTickets() async {
     await _ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_kNormal) ?? 0;
+    return prefs.getInt(_normalKey()) ?? 0;
   }
 
   static Future<int> priorityTickets() async {
     await _ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_kPriority) ?? 0;
+    return prefs.getInt(_priorityKey()) ?? 0;
   }
 
   /// 今日（JST）すでに使った至急枠の回数
@@ -76,15 +87,15 @@ class ConsultationTicketService {
   static Future<void> addNormalTickets(int delta) async {
     await _ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
-    final v = ((prefs.getInt(_kNormal) ?? 0) + delta).clamp(0, 1 << 20);
-    await prefs.setInt(_kNormal, v);
+    final v = ((prefs.getInt(_normalKey()) ?? 0) + delta).clamp(0, 1 << 20);
+    await prefs.setInt(_normalKey(), v);
   }
 
   static Future<void> addPriorityTickets(int delta) async {
     await _ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
-    final v = ((prefs.getInt(_kPriority) ?? 0) + delta).clamp(0, 1 << 20);
-    await prefs.setInt(_kPriority, v);
+    final v = ((prefs.getInt(_priorityKey()) ?? 0) + delta).clamp(0, 1 << 20);
+    await prefs.setInt(_priorityKey(), v);
   }
 
   /// 至急送信の直前チェック。null なら OK、文字列ならユーザー向けエラー
@@ -103,23 +114,39 @@ class ConsultationTicketService {
   static Future<String?> validateNormalSend() async {
     final n = await normalTickets();
     if (n < normalCostPerSend) {
-      return '通常相談券が不足しています。';
+      return '通常質問券が不足しています。';
     }
     return null;
+  }
+
+  /// 至急券（優先券）のみを検証（IAP 至急券用。1日枠は別途）。
+  static Future<String?> validateUrgentTicketSend() async {
+    final p = await priorityTickets();
+    if (p < priorityCostPerSend) {
+      return '至急券が不足しています。';
+    }
+    return null;
+  }
+
+  static Future<void> consumeUrgentTicket() async {
+    await _ensureInitialized();
+    final prefs = await SharedPreferences.getInstance();
+    final v = ((prefs.getInt(_priorityKey()) ?? 0) - priorityCostPerSend).clamp(0, 1 << 20);
+    await prefs.setInt(_priorityKey(), v);
   }
 
   static Future<void> consumeNormalTicket() async {
     await _ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
-    final v = ((prefs.getInt(_kNormal) ?? 0) - normalCostPerSend).clamp(0, 1 << 20);
-    await prefs.setInt(_kNormal, v);
+    final v = ((prefs.getInt(_normalKey()) ?? 0) - normalCostPerSend).clamp(0, 1 << 20);
+    await prefs.setInt(_normalKey(), v);
   }
 
   static Future<void> consumeUrgentSend() async {
     await _ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
-    final pt = ((prefs.getInt(_kPriority) ?? 0) - priorityCostPerSend).clamp(0, 1 << 20);
-    await prefs.setInt(_kPriority, pt);
+    final pt = ((prefs.getInt(_priorityKey()) ?? 0) - priorityCostPerSend).clamp(0, 1 << 20);
+    await prefs.setInt(_priorityKey(), pt);
 
     final today = _dateKeyJst(nowJstWallClock);
     final storedDay = prefs.getString(_kUrgentDayJst);

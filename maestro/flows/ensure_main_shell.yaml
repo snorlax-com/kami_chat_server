@@ -1,0 +1,40 @@
+appId: com.auraface.kami_face_oracle
+---
+- runFlow: dismiss_startup_dialogs.yaml
+- runFlow:
+    when:
+      visible: "性格診断結果"
+    commands:
+      - back
+- runFlow:
+    when:
+      visible: "ログインせずに終了しますか？"
+    commands:
+      - tapOn: "終了する"
+- runFlow:
+    when:
+      visible: "I am 18 or older"
+    file: dismiss_startup_dialogs.yaml
+- runFlow:
+    when:
+      visible: "設定"
+    commands:
+      - back
+- runFlow:
+    when:
+      visible: "Googleで続ける"
+    commands:
+      - back
+# ホーム or チュートリアル途中のいずれかで OK
+- extendedWaitUntil:
+    visible: "設定（ログイン・ログアウト）を開く"
+    timeout: 60000
+    optional: true
+- extendedWaitUntil:
+    visible: "陽占（チュートリアル）"
+    timeout: 30000
+    optional: true
+- extendedWaitUntil:
+    visible: "性格診断結果"
+    timeout: 30000
+    optional: true

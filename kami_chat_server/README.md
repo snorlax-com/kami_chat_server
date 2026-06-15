@@ -11,7 +11,7 @@
 
 ---
 
-アプリ（Flutter）は `POST /api/chat/send` でここに相談を送り、**Resend** 経由で開発者の **Gmail（ADMIN_EMAIL）** に通知します。
+アプリ（Flutter）は `POST /api/chat/send` でここに相談を送り、**Resend** 経由で創設者（占い師）の **Gmail（ADMIN_EMAIL）** に通知します。
 
 ### 相談種別（consultationType）
 
@@ -32,7 +32,7 @@
 | 変数 | 説明 |
 |------|------|
 | `RESEND_API_KEY` | [Resend](https://resend.com) の API キー |
-| `ADMIN_EMAIL` | 通知を受け取る Gmail（開発者） |
+| `ADMIN_EMAIL` | 通知を受け取る Gmail（創設者（占い師）） |
 | `MAIL_FROM` | Resend で検証済みの送信元（例: `AuraFace <onboarding@resend.dev>` または独自ドメイン） |
 | `BASE_URL` | **このサービスの公開 URL**（末尾スラッシュなし）。例: `https://kami-chat-server.onrender.com`。メール内「返信ページを開く」リンクに使います。 |
 | `TOKEN_SECRET` | 本番では長いランダム文字列（返信リンクの署名用） |
@@ -50,7 +50,7 @@
 2. ログの `[chat/send] consultationType` で `raw` / `normalized` が `priority_guidance` か確認する。`[sendConsultationMail][URGENT]` が出ていれば Resend まで至急テンプレで送っている。
 3. Flutter **リリース**は `kMailBridgeProductionUrl` 固定でこのサービスに送る。実機で以前「接続先を設定」した URL は占い相談では使われない。
 
-4. **至急で始めたのに追記だけ通常メールになる**とき: アプリの「開発者とのやりとり」は、追記の `consultationType` を **GET `/api/chat/thread` の先頭ユーザー発言**に合わせる（共有設定だけに依存しない）。`messages[].consultationType` が JSON に含まれることを Render ログで確認する。
+4. **至急で始めたのに追記だけ通常メールになる**とき: アプリの「創設者（占い師）とのやりとり」は、追記の `consultationType` を **GET `/api/chat/thread` の先頭ユーザー発言**に合わせる（共有設定だけに依存しない）。`messages[].consultationType` が JSON に含まれることを Render ログで確認する。
 
 ## ローカル
 

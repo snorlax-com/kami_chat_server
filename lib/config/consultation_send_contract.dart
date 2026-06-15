@@ -8,7 +8,6 @@ class ConsultationSendSource {
   static const consultationPageNew = 'consultation_page_new';
   static const developerChatFollowUp = 'developer_chat_follow_up';
   static const pillarChatTutorial = 'pillar_chat_tutorial';
-  static const mailBridgeTestPage = 'consultation_mail_bridge_test_page';
 }
 
 /// 新規送信時の consultationType をボタン押下だけで決める（保存済み Pref は使わない）

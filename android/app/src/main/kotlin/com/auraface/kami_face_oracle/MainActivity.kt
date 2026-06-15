@@ -2,6 +2,7 @@ package com.auraface.kami_face_oracle
 
 import android.content.ContentResolver
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -17,17 +18,23 @@ import java.io.InputStream
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.auraface.kami_face_oracle/file_access"
     private val INTENT_CHANNEL = "com.auraface.kami_face_oracle/intent"
+    private val BILLING_CHANNEL = "com.auraface.kami_face_oracle/billing"
     private var latestIntent: Intent? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         super.onCreate(savedInstanceState)
         latestIntent = intent
+    }
+
+    override fun onResume() {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        super.onResume()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         
-        // Intentで受け取った画像パスとauto_modeをFlutterに渡す
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INTENT_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "getIntentImagePath" -> {
@@ -41,6 +48,20 @@ class MainActivity : FlutterActivity() {
                 else -> {
                     result.notImplemented()
                 }
+            }
+        }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, BILLING_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getInstallerPackageName" -> {
+                    result.success(resolveInstallerPackageName())
+                }
+                "openPlayStoreUrl" -> {
+                    val url = call.argument<String>("url")
+                    val marketUrl = call.argument<String>("marketUrl")
+                    result.success(openPlayStoreUrl(url, marketUrl))
+                }
+                else -> result.notImplemented()
             }
         }
         
@@ -94,6 +115,49 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+    }
+
+    private fun resolveInstallerPackageName(): String? {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                packageManager.getInstallSourceInfo(packageName).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getInstallerPackageName(packageName)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "getInstallerPackageName failed", e)
+            null
+        }
+    }
+
+    private fun openPlayStoreUrl(httpsUrl: String?, marketUrl: String?): Boolean {
+        val candidates = listOfNotNull(marketUrl, httpsUrl).filter { it.isNotBlank() }
+        if (candidates.isEmpty()) return false
+
+        for (url in candidates) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    if (url.startsWith("https://play.google.com") || url.startsWith("market://")) {
+                        setPackage("com.android.vending")
+                    }
+                }
+                startActivity(intent)
+                android.util.Log.i("MainActivity", "openPlayStoreUrl ok: $url")
+                return true
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "openPlayStoreUrl failed (Play app): $url", e)
+            }
+
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                android.util.Log.i("MainActivity", "openPlayStoreUrl ok (fallback): $url")
+                return true
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "openPlayStoreUrl failed (fallback): $url", e)
+            }
+        }
+        return false
     }
 
     private fun copyFileToInternalStorage(externalPath: String): String? {

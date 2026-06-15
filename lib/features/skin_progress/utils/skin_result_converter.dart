@@ -51,6 +51,16 @@ class SkinResultConverter {
     print('  texture: ${skinResult.texture}, textureFineness: ${skinResult.textureFineness} → texture: $texture');
     print('  dryness: ${skinResult.dryness} → dryness: $dryness');
 
+    final g01 = faceDiagnosisGloss(skinResult);
+    final m01 = faceDiagnosisMoisture(skinResult);
+    final b01 = faceDiagnosisBloodTone(skinResult);
+    final conditionGrade = skinConditionGradeLetter(skinResult);
+    final glossPct = (g01 * 100).round().clamp(0, 100);
+    final moisturePct = (m01 * 100).round().clamp(0, 100);
+    final bloodPct = (b01 * 100).round().clamp(0, 100);
+    print(
+        '  艶/潤い/血色(0-1): ${g01.toStringAsFixed(2)} / ${m01.toStringAsFixed(2)} / ${b01.toStringAsFixed(2)} → 調子: $conditionGrade');
+
     return SkinDailyRecord(
       date: date,
       glow: glow,
@@ -58,6 +68,10 @@ class SkinResultConverter {
       dullness: dullness,
       texture: texture,
       dryness: dryness,
+      conditionGrade: conditionGrade,
+      glossPct: glossPct,
+      moisturePct: moisturePct,
+      bloodPct: bloodPct,
     );
   }
 }

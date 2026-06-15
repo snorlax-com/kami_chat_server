@@ -1,0 +1,51 @@
+appId: com.auraface.kami_face_oracle
+---
+# ストア・サブスク（sideload debug では「テスト加入」、Play 接続時は Google Play 画面）
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/go_consultation_tab.yaml
+# 未加入時はストアタブがロックされるため、占い相談から加入導線を開く
+- tapOn:
+    text: "メッセージを入力（送信時に券1枚）"
+    optional: true
+- inputText: "サブスクテスト用"
+- tapOn: "送信"
+- extendedWaitUntil:
+    visible: "サブスクが必要です"
+    timeout: 20000
+- tapOn: "加入する"
+- extendedWaitUntil:
+    visible:
+      text: ".*"
+    timeout: 30000
+# sideload / debug: テスト加入ダイアログ
+- runFlow:
+    when:
+      visible: "テスト加入"
+    commands:
+      - tapOn: "テスト加入"
+      - extendedWaitUntil:
+          visible: "サブスク: 加入中"
+          timeout: 20000
+          optional: true
+# Play Billing 経路
+- runFlow:
+    when:
+      visible: "サブスクに加入"
+    commands:
+      - tapOn: "サブスクに加入"
+      - extendedWaitUntil:
+          visible: "Google Play"
+          timeout: 30000
+          optional: true
+      - back
+- runFlow:
+    when:
+      visible: "占い相談"
+    file: flows/go_consultation_tab.yaml
+- assertVisible:
+    text: "サブスク: 加入中"
+    optional: true

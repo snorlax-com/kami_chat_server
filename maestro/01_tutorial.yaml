@@ -1,0 +1,19 @@
+appId: com.auraface.kami_face_oracle
+---
+# チュートリアル: E2E カメラルートで性格診断結果まで到達していることを確認
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/advance_tutorial_intro.yaml
+- runFlow: flows/complete_tutorial_camera.yaml
+- extendedWaitUntil:
+    visible: "性格診断結果"
+    timeout: 180000
+- assertVisible:
+    text: "ログインして詳細を見る"
+    optional: true
+- assertVisible:
+    text: "Google でログインが必要です"
+    optional: true

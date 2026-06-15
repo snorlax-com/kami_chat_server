@@ -1,12 +1,26 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:in_app_purchase_storekit/in_app_purchase_storekit.dart';
-import 'package:kami_face_oracle/services/currency_service.dart';
+import 'package:kami_face_oracle/app_navigation.dart';
+import 'package:kami_face_oracle/services/tutorial_subscribe_retake_service.dart';
+import 'package:kami_face_oracle/config/consultation_subscription_config.dart';
+import 'package:kami_face_oracle/config/play_billing_products.dart';
+import 'package:kami_face_oracle/config/store_billing_config.dart';
+import 'package:kami_face_oracle/services/billing_account_service.dart';
+import 'package:kami_face_oracle/services/billing_log.dart';
+import 'package:kami_face_oracle/services/billing_server_sync_service.dart';
+import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
+import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart';
+import 'package:kami_face_oracle/services/iap_purchase_ack_store.dart';
+import 'package:kami_face_oracle/services/play_billing_error_mapper.dart';
+import 'package:kami_face_oracle/services/play_install_service.dart';
+import 'package:kami_face_oracle/services/sideload_billing_service.dart';
+import 'package:kami_face_oracle/services/subscription_bonus_service.dart';
 
-/// IAP (In-App Purchase) サービス
-/// Google Play Billing / Apple App Store IAP統合
+/// Google Play Billing — 月額サブスク + 消耗型相談券。
 class IAPService {
   static final IAPService _instance = IAPService._internal();
   factory IAPService() => _instance;
@@ -17,143 +31,537 @@ class IAPService {
   final InAppPurchase _iap = InAppPurchase.instance;
   StreamSubscription<List<PurchaseDetails>>? _subscription;
   bool _isAvailable = false;
+  bool _playSubscriptionVerified = false;
   List<ProductDetails> _products = [];
+  String? _lastLoadError;
+  List<String> _notFoundProductIds = [];
+  final Set<String> _pendingProductIds = {};
+  Future<void>? _readyFuture;
 
-  /// IAPサービスの初期化
-  Future<void> init() async {
-    _isAvailable = await _iap.isAvailable();
-    if (!_isAvailable) return;
+  void Function(int ticketsGranted, String productId, {bool isUrgent})? onTicketsGranted;
+  void Function(String productId)? onPurchaseCanceled;
+  void Function(String productId, String? message)? onPurchaseFailed;
+  void Function(String productId)? onPurchasePending;
+  void Function(bool isActive, {int bonusTickets})? onSubscriptionUpdated;
 
-    // 購入ストリームの監視
-    _subscription = _iap.purchaseStream.listen(
-      _onPurchaseUpdate,
-      onDone: () => _subscription?.cancel(),
-      onError: (error) => _handleError(error),
-    );
+  bool get isAvailable => _isAvailable;
+  String? get lastLoadError => _lastLoadError;
+  List<String> get notFoundProductIds => List.unmodifiable(_notFoundProductIds);
+  Set<String> get pendingProductIds => Set.unmodifiable(_pendingProductIds);
 
-    // 未処理の購入を復元
-    await _restorePurchases();
+  bool isProductPending(String productId) => _pendingProductIds.contains(productId);
+
+  bool get hasVerifiedPlaySubscription => _playSubscriptionVerified;
+  bool get isPlayBillingReady => _isAvailable && hasPlayCatalog;
+
+  static Set<String> get allProductIds => {
+        ...PlayBillingProducts.allQueryProductIds,
+        ConsultationSubscriptionConfig.productId,
+        ...ConsultationTicketPacksService.packs.map((p) => p.id),
+      };
+
+  Future<void> init() async => ensureReady();
+
+  Future<void> ensureReady() async {
+    _readyFuture ??= _ensureReadyImpl();
+    await _readyFuture;
   }
 
-  /// 利用可能な商品IDのリスト（gem_packsから取得）
-  static const List<String> _productIds = [
-    'gem_pack_small', // 10ジェム (100円相当)
-    'gem_pack_medium', // 50ジェム (450円相当)
-    'gem_pack_large', // 100ジェム (800円相当)
-    'gem_pack_xlarge', // 200ジェム (1500円相当)
-  ];
+  Future<void> refreshCatalog() async {
+    await ensureReady();
+    await loadProducts();
+    await syncSubscriptionStatusFromPlay();
+    await _invalidateUnverifiedSubscriptionIfNeeded();
+  }
 
-  /// 商品詳細を取得
+  Future<void> _ensureReadyImpl() async {
+    await ConsultationTicketPacksService.ensureLoaded();
+    await ConsultationSubscriptionConfig.ensureLoaded();
+
+    try {
+      _isAvailable = await _iap.isAvailable();
+      BillingLog.info('isAvailable=$_isAvailable productIds=$allProductIds');
+      if (!_isAvailable) {
+        BillingLog.warn('billing not available — Play Store ログイン・内部テスト参加を確認');
+        return;
+      }
+
+      _subscription ??= _iap.purchaseStream.listen(
+        _onPurchaseUpdate,
+        onDone: () => _subscription?.cancel(),
+        onError: _handleError,
+      );
+
+      await loadProducts();
+      await syncSubscriptionStatusFromPlay();
+      await _invalidateUnverifiedSubscriptionIfNeeded();
+    } catch (e, st) {
+      _isAvailable = false;
+      BillingLog.error('init failed', e, st);
+    }
+  }
+
   Future<void> loadProducts() async {
+    await ConsultationTicketPacksService.ensureLoaded();
+    await ConsultationSubscriptionConfig.ensureLoaded();
+    _lastLoadError = null;
     if (!_isAvailable) return;
 
-    final Set<String> productIds = _productIds.toSet();
-    final ProductDetailsResponse response = await _iap.queryProductDetails(productIds);
-
+    final response = await _iap.queryProductDetails(allProductIds);
+    if (response.error != null) {
+      _lastLoadError = PlayBillingErrorMapper.userMessage(response.error);
+      BillingLog.error('queryProductDetails', response.error);
+    }
     if (response.notFoundIDs.isNotEmpty) {
-      // 一部の商品が見つからない場合でも続行
+      _notFoundProductIds = response.notFoundIDs;
+      BillingLog.warn('notFoundIDs=${response.notFoundIDs} — Play Console ID・反映待ちを確認');
+    } else {
+      _notFoundProductIds = [];
     }
 
     _products = response.productDetails;
+    BillingLog.info(
+      'catalog loaded: ${_products.length} [${_products.map((p) => p.id).join(", ")}]',
+    );
+    final sub = subscriptionProduct;
+    if (sub != null) {
+      BillingLog.info('subscription ready id=${sub.id} price=${sub.price}');
+    } else {
+      BillingLog.warn(
+        'subscription NOT in catalog (canonical=${ConsultationSubscriptionConfig.productId})',
+      );
+    }
   }
 
-  /// 商品一覧を取得
-  List<ProductDetails> get products => _products;
+  Future<void> _invalidateUnverifiedSubscriptionIfNeeded() async {
+    if (!StoreBillingConfig.requirePlayVerifiedAccess) return;
+    if (!_isAvailable || !hasSubscriptionInCatalog) {
+      _playSubscriptionVerified = false;
+      if (await _preserveSideloadTestSubscription()) {
+        BillingLog.info('keeping sideload test subscription');
+        return;
+      }
+      await ConsultationSubscriptionService.setActive(false);
+      BillingLog.info('cleared unverified local subscription (Play not ready)');
+    }
+  }
 
-  /// 商品を購入
-  Future<bool> buyProduct(ProductDetails product) async {
+  ProductDetails? productById(String id) {
+    for (final p in _products) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  ProductDetails? productForPack(ConsultationTicketPack pack) {
+    final direct = productById(pack.id);
+    if (direct != null) return direct;
+    final legacy = pack.isUrgent
+        ? PlayBillingProducts.legacyTicketUrgent10000
+        : PlayBillingProducts.legacyTicketNormal600;
+    return productById(legacy);
+  }
+
+  ProductDetails? get subscriptionProduct {
+    final canonical = ConsultationSubscriptionConfig.productId;
+    return productById(canonical) ??
+        productById(PlayBillingProducts.legacySubscriptionMonthly500);
+  }
+
+  bool get hasSubscriptionInCatalog => subscriptionProduct != null;
+  bool get hasPlayCatalog => _products.isNotEmpty;
+
+  bool canPurchaseViaPlay(ConsultationTicketPack pack) =>
+      _isAvailable && productForPack(pack) != null;
+
+  bool get canSubscribeViaPlay => _isAvailable && subscriptionProduct != null;
+
+  bool isPackInCatalog(ConsultationTicketPack pack) => productForPack(pack) != null;
+
+  /// Play 上で有効なサブスクがあるか（queryPastPurchases）。
+  Future<bool> hasActiveSubscriptionOnPlay() async {
     if (!_isAvailable) return false;
+    if (Platform.isAndroid) {
+      final android = _iap.getPlatformAddition<InAppPurchaseAndroidPlatformAddition>();
+      final response = await android.queryPastPurchases();
+      if (response.error != null) return false;
+      for (final purchase in response.pastPurchases) {
+        if (!PlayBillingProducts.isSubscriptionProduct(purchase.productID)) continue;
+        if (_isActivePurchaseStatus(purchase.status)) return true;
+      }
+      return false;
+    }
+    return ConsultationSubscriptionService.isActive();
+  }
 
-    final PurchaseParam purchaseParam = PurchaseParam(productDetails: product);
+  Future<StorePurchaseOutcome> purchaseConsumable(ConsultationTicketPack pack) async {
+    if (!_isAvailable) return const StorePurchaseUnavailable();
+    var product = productForPack(pack);
+    if (product == null) {
+      await loadProducts();
+      product = productForPack(pack);
+    }
+    if (product == null) return const StorePurchaseUnavailable();
+    final started = await _buyConsumable(product);
+    BillingLog.purchase('launchBillingFlow INAPP ${pack.id} started=$started');
+    return started
+        ? StorePurchasePlayLaunched(pack.id)
+        : StorePurchasePlayLaunchFailed(pack.id);
+  }
 
+  Future<StorePurchaseOutcome> subscribeViaPlay() async {
+    if (!_isAvailable) return const StorePurchaseUnavailable();
+    if (await hasActiveSubscriptionOnPlay()) {
+      return const StorePurchaseAlreadySubscribed();
+    }
+    var product = subscriptionProduct;
+    if (product == null) {
+      await loadProducts();
+      product = subscriptionProduct;
+    }
+    if (product == null) return const StorePurchaseUnavailable();
+    final started = await _buySubscription(product);
+    BillingLog.purchase(
+      'launchBillingFlow SUBS ${ConsultationSubscriptionConfig.productId} started=$started',
+    );
+    return started
+        ? StorePurchasePlayLaunched(ConsultationSubscriptionConfig.productId)
+        : StorePurchasePlayLaunchFailed(ConsultationSubscriptionConfig.productId);
+  }
+
+  Future<bool> _buyConsumable(ProductDetails product) async {
+    if (!_isAvailable) return false;
+    await _preparePlatformPurchase();
+    if (Platform.isAndroid && product is GooglePlayProductDetails) {
+      return _iap.buyConsumable(
+        purchaseParam: GooglePlayPurchaseParam(productDetails: product),
+        autoConsume: true,
+      );
+    }
+    return _iap.buyConsumable(
+      purchaseParam: PurchaseParam(productDetails: product),
+      autoConsume: true,
+    );
+  }
+
+  Future<bool> _buySubscription(ProductDetails product) async {
+    if (!_isAvailable) return false;
+    await _preparePlatformPurchase();
+    if (Platform.isAndroid && product is GooglePlayProductDetails) {
+      var token = product.offerToken;
+      if (token == null || token.isEmpty) {
+        BillingLog.warn('buySubscription missing offerToken id=${product.id} — reload catalog');
+        await loadProducts();
+        final refreshed = subscriptionProduct;
+        if (refreshed is GooglePlayProductDetails) {
+          token = refreshed.offerToken;
+        }
+      }
+      if (token == null || token.isEmpty) {
+        BillingLog.error('buySubscription still missing offerToken', product.id);
+        return false;
+      }
+      return _iap.buyNonConsumable(
+        purchaseParam: GooglePlayPurchaseParam(
+          productDetails: product,
+          offerToken: token,
+        ),
+      );
+    }
+    return _iap.buyNonConsumable(purchaseParam: PurchaseParam(productDetails: product));
+  }
+
+  Future<void> _preparePlatformPurchase() async {
     if (Platform.isIOS) {
-      final InAppPurchaseStoreKitPlatformAddition iosPlatformAddition =
-          _iap.getPlatformAddition<InAppPurchaseStoreKitPlatformAddition>();
-      await iosPlatformAddition.showPriceConsentIfNeeded();
+      final ios = _iap.getPlatformAddition<InAppPurchaseStoreKitPlatformAddition>();
+      await ios.showPriceConsentIfNeeded();
+    }
+  }
+
+  Future<void> restorePurchases() async {
+    if (!_isAvailable) {
+      BillingLog.warn('restorePurchases skipped: billing unavailable');
+      return;
+    }
+    BillingLog.info('restorePurchases start');
+    await _iap.restorePurchases();
+    await syncSubscriptionStatusFromPlay();
+    BillingLog.info('restorePurchases done');
+  }
+
+  static Future<bool> _preserveSideloadTestSubscription() async {
+    await PlayInstallService.ensureLoaded();
+    if (!PlayInstallService.isSideloadInstall) return false;
+    return SideloadBillingService.hasSideloadTestPurchase();
+  }
+
+  Future<void> syncSubscriptionStatusFromPlay() async {
+    if (!_isAvailable) {
+      if (StoreBillingConfig.requirePlayVerifiedAccess) {
+        _playSubscriptionVerified = false;
+        if (await _preserveSideloadTestSubscription()) {
+          BillingLog.info('syncSubscription: keep sideload test (billing unavailable)');
+          return;
+        }
+        final wasActive = await ConsultationSubscriptionService.isActive();
+        await ConsultationSubscriptionService.setActive(false);
+        if (wasActive) onSubscriptionUpdated?.call(false, bonusTickets: 0);
+      }
+      return;
     }
 
-    return await _iap.buyNonConsumable(purchaseParam: purchaseParam);
+    var active = false;
+    if (Platform.isAndroid) {
+      final android = _iap.getPlatformAddition<InAppPurchaseAndroidPlatformAddition>();
+      final response = await android.queryPastPurchases();
+      if (response.error != null) {
+        BillingLog.error('queryPastPurchases', response.error);
+      } else {
+        for (final purchase in response.pastPurchases) {
+          if (!PlayBillingProducts.isSubscriptionProduct(purchase.productID)) continue;
+          if (_isActivePurchaseStatus(purchase.status)) {
+            active = true;
+            await _acknowledgeIfNeeded(purchase, fromRestore: true);
+          }
+        }
+      }
+    } else {
+      active = await ConsultationSubscriptionService.isActive();
+    }
+
+    if (!active && await _preserveSideloadTestSubscription()) {
+      active = true;
+      BillingLog.info('syncSubscription: sideload test preserved');
+    }
+
+    _playSubscriptionVerified = active;
+    BillingLog.info('syncSubscription active=$active verified=$_playSubscriptionVerified');
+
+    if (BillingAccountService.canUseServerBilling) {
+      await BillingAccountService.syncFromServer();
+      active = await ConsultationSubscriptionService.isActive();
+    } else {
+      final wasActive = await ConsultationSubscriptionService.isActive();
+      await ConsultationSubscriptionService.setActive(active);
+      if (!wasActive && active) {
+        final bonus = await SubscriptionBonusService.grantFirstBonusIfEligible();
+        onSubscriptionUpdated?.call(true, bonusTickets: bonus);
+        await TutorialSubscribeRetakeService.onSubscriptionActivated(
+          wasSubscribedBefore: wasActive,
+        );
+      } else if (wasActive != active) {
+        onSubscriptionUpdated?.call(active, bonusTickets: 0);
+        AppNavigation.notifyStoreAccessChanged();
+      }
+      return;
+    }
+
+    final wasActive = await ConsultationSubscriptionService.isActive();
+    if (!wasActive && active) {
+      final bonus = await SubscriptionBonusService.grantFirstBonusIfEligible();
+      onSubscriptionUpdated?.call(true, bonusTickets: bonus);
+      await TutorialSubscribeRetakeService.onSubscriptionActivated(
+        wasSubscribedBefore: wasActive,
+      );
+    } else if (wasActive != active) {
+      onSubscriptionUpdated?.call(active, bonusTickets: 0);
+      AppNavigation.notifyStoreAccessChanged();
+    }
   }
 
-  /// 購入履歴を復元
-  Future<void> restorePurchases() async {
-    await _restorePurchases();
-  }
+  static bool _isActivePurchaseStatus(PurchaseStatus status) =>
+      status == PurchaseStatus.purchased || status == PurchaseStatus.restored;
 
-  /// 購入更新のハンドラー
-  void _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
+  Future<void> _onPurchaseUpdate(List<PurchaseDetails> purchases) async {
     for (final purchase in purchases) {
+      final productId = purchase.productID;
+      final canonicalId = PlayBillingProducts.resolveCanonicalProductId(productId);
+
       if (purchase.status == PurchaseStatus.pending) {
-        // 購入保留中（承認待ちなど）
+        _pendingProductIds.add(canonicalId);
+        BillingLog.purchase('pending product=$productId');
+        onPurchasePending?.call(canonicalId);
         continue;
       }
+
+      _pendingProductIds.remove(canonicalId);
 
       if (purchase.status == PurchaseStatus.error) {
-        // エラー処理
-        _handlePurchaseError(purchase);
-        await _iap.completePurchase(purchase);
+        final msg = PlayBillingErrorMapper.userMessage(purchase.error, productId: productId);
+        BillingLog.error('purchase error product=$productId', purchase.error?.message);
+        onPurchaseFailed?.call(canonicalId, msg);
+        await _acknowledgeIfNeeded(purchase);
         continue;
-      }
-
-      if (purchase.status == PurchaseStatus.purchased || purchase.status == PurchaseStatus.restored) {
-        // 購入成功：ジェムを付与
-        await _grantGems(purchase);
-        await _iap.completePurchase(purchase);
       }
 
       if (purchase.status == PurchaseStatus.canceled) {
-        // キャンセル
-        await _iap.completePurchase(purchase);
+        BillingLog.purchase('canceled product=$productId');
+        onPurchaseCanceled?.call(canonicalId);
+        await _acknowledgeIfNeeded(purchase);
+        continue;
+      }
+
+      if (_isActivePurchaseStatus(purchase.status)) {
+        BillingLog.purchase(
+          'success product=$productId status=${purchase.status} pendingComplete=${purchase.pendingCompletePurchase}',
+        );
+        final result = await _grantBenefitIfNew(purchase);
+        await _acknowledgeIfNeeded(purchase);
+
+        if (PlayBillingProducts.isSubscriptionProduct(productId)) {
+          _playSubscriptionVerified = true;
+          onSubscriptionUpdated?.call(true, bonusTickets: result.bonusTickets);
+          await TutorialSubscribeRetakeService.onSubscriptionActivated(
+            wasSubscribedBefore: await ConsultationSubscriptionService.isActive(),
+          );
+        }
+        if (result.ticketsGranted > 0) {
+          onTicketsGranted?.call(
+            result.ticketsGranted,
+            canonicalId,
+            isUrgent: result.isUrgent,
+          );
+          BillingLog.info('iap ticketsGranted backup return');
+          AppNavigation.returnToConsultationAfterStorePurchase();
+        }
       }
     }
   }
 
-  /// ジェム付与ロジック
-  Future<void> _grantGems(PurchaseDetails purchase) async {
-    final productId = purchase.productID;
-    int gems = 0;
+  /// Android: acknowledgePurchase / completePurchase（消耗型は autoConsume）。
+  Future<void> _acknowledgeIfNeeded(PurchaseDetails purchase, {bool fromRestore = false}) async {
+    if (!purchase.pendingCompletePurchase) return;
+    try {
+      await _iap.completePurchase(purchase);
+      BillingLog.purchase(
+        'acknowledged product=${purchase.productID} restore=$fromRestore',
+      );
+    } catch (e, st) {
+      BillingLog.error('completePurchase failed', e, st);
+    }
+  }
 
-    // 商品IDに応じてジェム数を決定
-    switch (productId) {
-      case 'gem_pack_small':
-        gems = 10;
-        break;
-      case 'gem_pack_medium':
-        gems = 50;
-        break;
-      case 'gem_pack_large':
-        gems = 100;
-        break;
-      case 'gem_pack_xlarge':
-        gems = 200;
-        break;
-      default:
-        // 未知の商品ID
-        return;
+  Future<({int ticketsGranted, int bonusTickets, bool isUrgent})> _grantBenefitIfNew(
+    PurchaseDetails purchase,
+  ) async {
+    final productId = purchase.productID;
+    final purchaseId = purchase.purchaseID ?? '${productId}_${purchase.transactionDate}';
+    final isNew = await IapPurchaseAckStore.markProcessedIfNew(purchaseId);
+    if (!isNew) {
+      BillingLog.info('skip duplicate purchaseId=$purchaseId');
+      return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
     }
 
-    // ジェムを付与
-    await CurrencyService.addGems(gems);
+    final token = _extractPurchaseToken(purchase);
+    final orderId = _extractOrderId(purchase);
+    final timeMs = _extractPurchaseTimeMs(purchase);
+    final isSub = PlayBillingProducts.isSubscriptionProduct(productId);
+
+    if (token == null || token.isEmpty) {
+      BillingLog.warn('grant skipped: no purchaseToken product=$productId');
+      return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
+    }
+
+    final verified = await BillingServerSyncService.verifyPurchaseOnServer(
+      productId: PlayBillingProducts.playStoreProductId(productId),
+      purchaseToken: token,
+      isSubscription: isSub,
+    );
+    if (verified == null) {
+      BillingLog.warn('grant skipped: server verify failed product=$productId');
+      return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
+    }
+
+    await BillingAccountService.applyStatus(verified);
+
+    unawaited(
+      BillingServerSyncService.syncPurchaseAudit(
+        productId: productId,
+        purchaseId: purchaseId,
+        purchaseToken: token,
+        orderId: orderId,
+        purchaseTimeMs: timeMs,
+        isSubscription: isSub,
+        isRestore: purchase.status == PurchaseStatus.restored,
+      ),
+    );
+
+    if (isSub) {
+      BillingLog.purchase('subscription verified via server');
+      return (ticketsGranted: verified.normal, bonusTickets: 0, isUrgent: false);
+    }
+
+    final pack = ConsultationTicketPacksService.getPackById(productId);
+    if (pack == null || pack.tickets <= 0) {
+      BillingLog.warn('unknown consumable product=$productId');
+      return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
+    }
+
+    BillingLog.purchase('granted via server ${pack.tickets} ${pack.ticketType.name}');
+    return (
+      ticketsGranted: pack.tickets,
+      bonusTickets: 0,
+      isUrgent: pack.isUrgent,
+    );
   }
 
-  /// 購入の復元
-  Future<void> _restorePurchases() async {
-    if (!_isAvailable) return;
-
-    await _iap.restorePurchases();
+  static String? _extractPurchaseToken(PurchaseDetails purchase) {
+    if (Platform.isAndroid && purchase is GooglePlayPurchaseDetails) {
+      return purchase.billingClientPurchase.purchaseToken;
+    }
+    return null;
   }
 
-  /// エラーハンドリング
-  void _handleError(dynamic error) {
-    // エラーログ（実際のアプリではFirebase Crashlyticsなどに送信）
+  static String? _extractOrderId(PurchaseDetails purchase) {
+    if (Platform.isAndroid && purchase is GooglePlayPurchaseDetails) {
+      return purchase.billingClientPurchase.orderId;
+    }
+    return purchase.purchaseID;
   }
 
-  void _handlePurchaseError(PurchaseDetails purchase) {
-    // 購入エラーの処理（実際のアプリではユーザーに通知）
+  static int? _extractPurchaseTimeMs(PurchaseDetails purchase) {
+    if (Platform.isAndroid && purchase is GooglePlayPurchaseDetails) {
+      return purchase.billingClientPurchase.purchaseTime;
+    }
+    final raw = purchase.transactionDate;
+    if (raw == null) return null;
+    final parsed = int.tryParse(raw);
+    return parsed;
   }
 
-  /// リソースのクリーンアップ
+  void _handleError(Object error) {
+    BillingLog.error('purchase stream error', error);
+    onPurchaseFailed?.call('', PlayBillingErrorMapper.userMessage(error));
+  }
+
   void dispose() {
     _subscription?.cancel();
+    onTicketsGranted = null;
+    onPurchaseCanceled = null;
+    onPurchaseFailed = null;
+    onPurchasePending = null;
+    onSubscriptionUpdated = null;
   }
+}
+
+sealed class StorePurchaseOutcome {
+  const StorePurchaseOutcome();
+}
+
+final class StorePurchasePlayLaunched extends StorePurchaseOutcome {
+  const StorePurchasePlayLaunched(this.productId);
+  final String productId;
+}
+
+final class StorePurchasePlayLaunchFailed extends StorePurchaseOutcome {
+  const StorePurchasePlayLaunchFailed(this.productId);
+  final String productId;
+}
+
+final class StorePurchaseUnavailable extends StorePurchaseOutcome {
+  const StorePurchaseUnavailable();
+}
+
+final class StorePurchaseAlreadySubscribed extends StorePurchaseOutcome {
+  const StorePurchaseAlreadySubscribed();
 }

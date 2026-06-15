@@ -56,6 +56,9 @@ class SkinDiagnosisResultPage extends StatelessWidget {
             ),
             const SizedBox(height: 16),
 
+            _buildSkinConditionGradeCard(skinResult),
+            const SizedBox(height: 16),
+
             // 8項目のグリッド表示
             _build8MetricsGrid(skinResult),
             const SizedBox(height: 24),
@@ -86,6 +89,89 @@ class SkinDiagnosisResultPage extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 艶・潤い・血色から S/A/B/C の調子を表示
+  Widget _buildSkinConditionGradeCard(SkinAnalysisResult skin) {
+    final letter = skinConditionGradeLetter(skin);
+    final title = skinConditionGradeTitleJa(letter);
+    final g = (faceDiagnosisGloss(skin) * 100).round().clamp(0, 100);
+    final m = (faceDiagnosisMoisture(skin) * 100).round().clamp(0, 100);
+    final b = (faceDiagnosisBloodTone(skin) * 100).round().clamp(0, 100);
+    Color accent;
+    switch (letter) {
+      case 'S':
+        accent = const Color(0xFF7C3AED);
+        break;
+      case 'A':
+        accent = const Color(0xFF4E6CF0);
+        break;
+      case 'B':
+        accent = const Color(0xFFF59E0B);
+        break;
+      default:
+        accent = const Color(0xFF94A3B8);
+    }
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: accent.withValues(alpha: 0.35), width: 1.5),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'その日の肌の調子',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  letter,
+                  style: TextStyle(
+                    fontSize: 52,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                    color: accent,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'つや $g% ・ 潤い $m% ・ 血色 $b%',
+                        style: const TextStyle(fontSize: 14, color: Colors.black54, height: 1.35),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),

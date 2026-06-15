@@ -1,0 +1,54 @@
+appId: com.auraface.kami_face_oracle
+---
+# メッセージ送信（サブスク+券が必要）
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/go_consultation_tab.yaml
+- tapOn:
+    text: "メッセージを入力（送信時に券1枚）"
+    optional: true
+- inputText: "Maestro通常相談の自動テストです"
+- tapOn: "送信"
+# 未加入・券なし
+- runFlow:
+    when:
+      visible: "サブスクが必要です"
+    commands:
+      - assertVisible: "サブスクが必要です"
+      - tapOn: "あとで"
+# 加入済み・券あり
+- runFlow:
+    when:
+      visible: "サブスク: 加入中"
+    commands:
+      - tapOn:
+          text: "メッセージを入力（送信時に券1枚）"
+          optional: true
+      - inputText: "Maestro送信テスト加入済み"
+      - tapOn: "送信"
+      - extendedWaitUntil:
+          visible: "送信しました"
+          timeout: 60000
+          optional: true
+      - extendedWaitUntil:
+          visible: "Maestro送信テスト加入済み"
+          timeout: 30000
+          optional: true
+# 至急送信（至急券がある場合）
+- runFlow:
+    when:
+      visible: "至急"
+    commands:
+      - tapOn: "至急"
+      - tapOn:
+          text: "メッセージを入力（送信時に券1枚）"
+          optional: true
+      - inputText: "Maestro至急相談テスト"
+      - tapOn: "送信"
+      - extendedWaitUntil:
+          visible: "至急相談を送信しました"
+          timeout: 60000
+          optional: true

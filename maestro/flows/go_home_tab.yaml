@@ -1,0 +1,22 @@
+appId: com.auraface.kami_face_oracle
+---
+- runFlow: dismiss_startup_dialogs.yaml
+- runFlow: advance_tutorial_intro.yaml
+- runFlow: exit_guest_result_to_home.yaml
+- runFlow: ensure_main_shell.yaml
+- runFlow:
+      when:
+          visible: "設定"
+      commands:
+          - back
+- tapOn:
+      text: "ホーム"
+      optional: true
+- tapOn:
+      id: "maestro_tab_home"
+      optional: true
+- tapOn:
+      point: "10%,95%"
+- extendedWaitUntil:
+      visible: "設定（ログイン・ログアウト）を開く"
+      timeout: 90000

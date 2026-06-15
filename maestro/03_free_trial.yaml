@@ -1,0 +1,33 @@
+appId: com.auraface.kami_face_oracle
+---
+# 無料1回体験は廃止。サブスク未加入時は送信不可→サブスク案内ダイアログ。
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/go_consultation_tab.yaml
+- tapOn:
+    text: "メッセージを入力（送信時に券1枚）"
+    optional: true
+- inputText: "Maestro無料利用テスト1回目"
+- tapOn: "送信"
+- extendedWaitUntil:
+    visible: "サブスクが必要です"
+    timeout: 20000
+- assertVisible: "サブスクが必要です"
+- assertVisible:
+    text: "月額サブスク"
+    optional: true
+- tapOn: "あとで"
+# 2回目も同様に無料では送れない
+- tapOn:
+    text: "メッセージを入力（送信時に券1枚）"
+    optional: true
+- inputText: "Maestro無料利用テスト2回目"
+- tapOn: "送信"
+- extendedWaitUntil:
+    visible: "サブスクが必要です"
+    timeout: 20000
+- assertVisible: "サブスクが必要です"
+- tapOn: "あとで"

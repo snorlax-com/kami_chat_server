@@ -10,11 +10,16 @@ class DevicePoseGate {
   final double pitchThresholdDeg; // deg
   final double rollThresholdDeg; // deg
 
+  /// 起動直後は加速度・ジャイロのイベントが遅れがち。0 より長いとその間だけ
+  /// 縦持ち・静止チェックを緩め、顔検出側の自動シャッターが成立しやすくする。
+  final Duration sensorWarmUp;
+
   DevicePoseGate({
     this.gyroStillThreshold = 0.08,
     this.gyroStableRequiredFrames = 12,
     this.pitchThresholdDeg = 6.0,
     this.rollThresholdDeg = 6.0,
+    this.sensorWarmUp = Duration.zero,
   });
 
   StreamSubscription<GyroscopeEvent>? _gyroSub;
@@ -27,12 +32,23 @@ class DevicePoseGate {
 
   int _gyroStableFrames = 0;
 
-  bool get deviceIsStill => _gyroStableFrames >= gyroStableRequiredFrames;
-  bool get deviceIsVertical => pitchDeg.abs() <= pitchThresholdDeg && rollDeg.abs() <= rollThresholdDeg;
+  DateTime? _permissiveUntil;
+
+  bool get _sensorWarm =>
+      _permissiveUntil != null && !DateTime.now().isAfter(_permissiveUntil!);
+
+  bool get deviceIsStill =>
+      _sensorWarm || _gyroStableFrames >= gyroStableRequiredFrames;
+  bool get deviceIsVertical =>
+      _sensorWarm ||
+      (pitchDeg.abs() <= pitchThresholdDeg && rollDeg.abs() <= rollThresholdDeg);
 
   void start() {
     _gyroSub?.cancel();
     _accSub?.cancel();
+
+    _permissiveUntil =
+        sensorWarmUp > Duration.zero ? DateTime.now().add(sensorWarmUp) : null;
 
     _gyroSub = gyroscopeEventStream().listen((e) {
       final mag = math.sqrt(e.x * e.x + e.y * e.y + e.z * e.z);

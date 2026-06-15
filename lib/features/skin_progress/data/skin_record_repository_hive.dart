@@ -1,14 +1,15 @@
 import 'package:hive/hive.dart';
 import '../model/skin_daily_record.dart';
+import 'skin_daily_records_box.dart';
 import 'skin_record_repository.dart';
 
 class SkinRecordRepositoryHive implements SkinRecordRepository {
-  final Box<Map> box;
-
-  SkinRecordRepositoryHive(this.box);
+  Future<Box<Map>?> _box() => SkinDailyRecordsBox.ensureOpen();
 
   @override
   Future<List<SkinDailyRecord>> getAll() async {
+    final box = await _box();
+    if (box == null) return [];
     final items = <SkinDailyRecord>[];
     for (final key in box.keys) {
       final data = box.get(key);
@@ -20,11 +21,15 @@ class SkinRecordRepositoryHive implements SkinRecordRepository {
 
   @override
   Future<void> upsert(SkinDailyRecord record) async {
+    final box = await _box();
+    if (box == null) return;
     await box.put(record.dayKey, record.toMap());
   }
 
   @override
   Future<void> deleteByDayKey(String dayKey) async {
+    final box = await _box();
+    if (box == null) return;
     await box.delete(dayKey);
   }
 }

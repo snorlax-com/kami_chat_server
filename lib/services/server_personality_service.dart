@@ -4,20 +4,30 @@ import 'dart:io' if (dart.library.html) 'package:kami_face_oracle/core/io_stub.d
 import 'package:http/http.dart' as http;
 import 'package:kami_face_oracle/core/personality_tree_classifier.dart';
 import 'package:kami_face_oracle/features/consent/consent_service.dart';
+import 'package:kami_face_oracle/config/diagnosis_server_config.dart';
+import 'package:kami_face_oracle/services/auth_api_headers.dart';
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 
 /// サーバーで性格診断を実行するサービス
 class ServerPersonalityService {
-  // サーバーURL（環境変数や設定ファイルから読み込むことも可能）
-  static const String serverUrl = 'http://45.77.26.42:8000';
+  static String get serverUrl => DiagnosisServerConfig.baseUrl;
   static const String apiKey = ''; // 必要に応じて設定
+
+  static void _log(String msg) {
+    if (kDebugMode) debugPrint('[ServerPersonalityService] $msg');
+  }
 
   /// 撮影後・正面判定。同意不要。OK なら is_frontal: true、NG なら reasons / suggestion を返す。
   static Future<Map<String, dynamic>> validateFace(List<int> jpegBytes) async {
     final uri = Uri.parse('$serverUrl/validate_face');
+    final auth = await AuthApiHeaders.authorizationJson();
     final res = await http
         .post(
           uri,
-          headers: {'Content-Type': 'application/octet-stream'},
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            ...auth,
+          },
           body: jpegBytes,
         )
         .timeout(
@@ -48,7 +58,7 @@ class ServerPersonalityService {
     String filename,
   ) async {
     try {
-      print('[ServerPersonalityService] サーバーに画像を送信中（bytes）... size=${bytes.length} filename=$filename');
+      _log('predict send bytes size=${bytes.length}');
       final sessionId = await ConsentService.instance.getOrCreateSessionId();
       final request = http.MultipartRequest(
         'POST',
@@ -56,6 +66,8 @@ class ServerPersonalityService {
       );
       request.headers['X-Consent-Session-ID'] = sessionId;
       if (apiKey.isNotEmpty) request.headers['X-API-Key'] = apiKey;
+      final auth = await AuthApiHeaders.authorizationJson();
+      request.headers.addAll(auth);
       request.files.add(http.MultipartFile.fromBytes(
         'file',
         bytes,
@@ -69,27 +81,27 @@ class ServerPersonalityService {
         const Duration(seconds: 120),
         onTimeout: () => throw TimeoutException('サーバーからの応答の受信がタイムアウトしました'),
       );
-      print('[ServerPersonalityService] 応答: status=${response.statusCode} bodyLength=${response.body.length}');
+      _log('predict response status=${response.statusCode} len=${response.body.length}');
       if (response.statusCode == 200) {
         final jsonData = json.decode(response.body) as Map<String, dynamic>;
         final serverInference = jsonData['server_inference'] as bool?;
         if (serverInference != true) throw Exception('サーバー推論が確認できませんでした。');
-        print('[ServerPersonalityService] ✅ サーバー推論成功（bytes）');
+        _log('predict ok');
         return _convertServerResponseToResult(jsonData);
       }
       if (response.statusCode == 403) {
-        print('[ServerPersonalityService] ❌ 403 Consent required');
+        _log('predict 403 consent required');
         throw Exception('CONSENT_REQUIRED');
       }
       final msg = _statusCodeToMessage(response.statusCode);
-      print('[ServerPersonalityService] ❌ サーバーエラー: ${response.statusCode}');
+      _log('predict error status=${response.statusCode}');
       throw Exception(msg);
     } catch (e, stackTrace) {
       if (e is TimeoutException) {
         print('[ServerPersonalityService] ❌ タイムアウト');
       } else {
         print('[ServerPersonalityService] ❌ エラー: $e');
-        print('[ServerPersonalityService] スタック: ${stackTrace.toString().split("\n").take(5).join("\n")}');
+        print('[ServerPersonalityService] スタック: ${stackTrace?.toString().split("\n").take(5).join("\n")}');
       }
       rethrow;
     }
@@ -116,6 +128,8 @@ class ServerPersonalityService {
       );
       request.headers['X-Consent-Session-ID'] = sessionId;
       if (apiKey.isNotEmpty) request.headers['X-API-Key'] = apiKey;
+      final auth = await AuthApiHeaders.authorizationJson();
+      request.headers.addAll(auth);
       request.files.add(
         await http.MultipartFile.fromPath(
           'file',
@@ -163,10 +177,10 @@ class ServerPersonalityService {
 
         return result;
       } else if (response.statusCode == 403) {
-        print('[ServerPersonalityService] ❌ 403 Consent required');
+        _log('predict 403 consent required');
         throw Exception('CONSENT_REQUIRED');
       } else {
-        print('[ServerPersonalityService] ❌ サーバーエラー: ${response.statusCode}');
+        _log('predict error status=${response.statusCode}');
         print('[ServerPersonalityService] レスポンス: ${response.body}');
         throw Exception('サーバーエラー: ${response.statusCode}');
       }
@@ -182,63 +196,6 @@ class ServerPersonalityService {
   static PersonalityTreeDiagnosisResult _convertServerResponseToResult(
     Map<String, dynamic> jsonData,
   ) {
-    // サーバー実装差異吸収:
-    // - 一部のAPIは result フィールド内に本体が入る
-    // - キー名が snake_case / camelCase / 大文字小文字混在することがある
-    final payload = () {
-      final r = jsonData['result'];
-      if (r is Map) return Map<String, dynamic>.from(r);
-      return jsonData;
-    }();
-
-    int? readInt(List<String> keys) {
-      for (final k in keys) {
-        final v = payload[k] ?? jsonData[k];
-        if (v == null) continue;
-        if (v is int) return v;
-        if (v is num) return v.toInt();
-        final s = v.toString().trim();
-        final parsed = int.tryParse(s);
-        if (parsed != null) return parsed;
-      }
-      return null;
-    }
-
-    String? readString(List<String> keys) {
-      for (final k in keys) {
-        final v = payload[k] ?? jsonData[k];
-        if (v == null) continue;
-        final s = v.toString();
-        if (s.isNotEmpty) return s;
-      }
-      return null;
-    }
-
-    dynamic readLayerValue(int i) {
-      final candidates = <String>[
-        'L$i',
-        'l$i',
-        'layer$i',
-        'layer_$i',
-      ];
-      for (final k in candidates) {
-        if (payload.containsKey(k)) return payload[k];
-        if (jsonData.containsKey(k)) return jsonData[k];
-      }
-      // まとめて返す形式: { layers: { L1: "...", ... } } / { layer_results: { ... } }
-      final groupedKeys = <String>['layers', 'layer_results', 'layerResults'];
-      for (final gk in groupedKeys) {
-        final g = payload[gk] ?? jsonData[gk];
-        if (g is Map) {
-          final gm = Map<String, dynamic>.from(g);
-          for (final k in candidates) {
-            if (gm.containsKey(k)) return gm[k];
-          }
-        }
-      }
-      return null;
-    }
-
     // Layer結果を取得（サーバーからのL1-L9を日本語形式に変換）
     final layerResults = <String, String>{};
     final layerNames = {
@@ -254,51 +211,24 @@ class ServerPersonalityService {
     };
 
     for (int i = 1; i <= 9; i++) {
-      final v = readLayerValue(i);
-      if (v != null) {
-        final layerKey = 'L$i';
+      final layerKey = 'L$i';
+      if (jsonData.containsKey(layerKey)) {
         final layerName = layerNames[layerKey] ?? layerKey;
-        layerResults[layerName] = v.toString();
-        print('[ServerPersonalityService] $layerName: $v');
+        layerResults[layerName] = jsonData[layerKey].toString();
+        print('[ServerPersonalityService] $layerName: ${jsonData[layerKey]}');
       }
     }
 
     // 性格タイプを取得
-    final personalityType = readInt(
-          const [
-            'personality_type',
-            'personalityType',
-            'personality_type_id',
-            'personalityTypeId',
-            'type',
-          ],
-        ) ??
-        1;
-    final personalityTypeName = readString(
-          const [
-            'personality_type_name',
-            'personalityTypeName',
-            'type_name',
-            'typeName',
-          ],
-        ) ??
-        'タイプ$personalityType';
-
-    // 説明文（サーバーが返す場合は最優先）
-    final personalityDescription = readString(
-          const [
-            'personality_description',
-            'personalityDescription',
-            'type_description',
-            'typeDescription',
-          ],
-        ) ??
-        _getPersonalityDescription(personalityType);
+    final personalityType = jsonData['personality_type'] as int? ?? 1;
+    final personalityTypeName = jsonData['personality_type_name'] as String? ?? 'タイプ$personalityType';
 
     // 柱情報を取得（サーバーから来る場合）
-    final pillarId = readString(const ['pillar_id', 'pillarId']);
-    final pillarTitle = readString(const ['pillar_title', 'pillarTitle']);
-    final characterImage = readString(const ['character_image', 'characterImage']);
+    final pillarId = jsonData['pillar_id'] as String?;
+    final pillarName = jsonData['pillar_name'] as String?;
+    final pillarTitle = jsonData['pillar_title'] as String?;
+    final characterImage = jsonData['character_image'] as String?;
+    final illustrationImage = jsonData['illustration_image'] as String?;
 
     // 柱情報をログ出力
     if (pillarId != null) {
@@ -325,7 +255,7 @@ class ServerPersonalityService {
     return PersonalityTreeDiagnosisResult(
       personalityType: personalityType,
       personalityTypeName: personalityTypeName,
-      personalityDescription: personalityDescription,
+      personalityDescription: _getPersonalityDescription(personalityType),
       layerResults: layerResults,
       layerValues: layerValues,
       layerReasons: <String, String>{}, // サーバーからは理由が来ないため空
