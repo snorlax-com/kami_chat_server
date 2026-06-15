@@ -1,5 +1,5 @@
 {
-  "productId": "monthly_subscription_500",
+  "productId": "subscription_monthly_500",
   "name": "月額サブスク",
   "description": "質問機能を利用するにはサブスク加入が必要です。初回加入時に質問券1枚をプレゼントします。",
   "priceYen": 500,

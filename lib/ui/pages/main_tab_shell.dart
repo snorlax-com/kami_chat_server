@@ -64,6 +64,15 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
     '他の人の相談',
   ];
 
+  /// Maestro / アクセシビリティ用（下部タブ）
+  static const _tabSemanticsIds = [
+    'maestro_tab_home',
+    'maestro_tab_consultation',
+    'maestro_tab_store',
+    'maestro_tab_meditation',
+    'maestro_tab_public',
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -409,6 +418,7 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
                   ),
                 ),
                 Semantics(
+                  identifier: 'maestro_open_settings',
                   label: '設定（ログイン・ログアウト）を開く',
                   child: IconButton(
                     icon: const Icon(Icons.settings_outlined),
@@ -470,6 +480,7 @@ class _MainTabShellState extends State<MainTabShell> with WidgetsBindingObserver
                 for (var i = 0; i < 5; i++)
                   BottomNavigationBarItem(
                     icon: Semantics(
+                      identifier: _tabSemanticsIds[i],
                       label: _titles[i],
                       button: true,
                       child: _navIcon(i, i == _index),

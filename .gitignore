@@ -67,3 +67,6 @@ auraface-chat-mail-bridge/data.sqlite
 kami_chat_server/data/
 macos_backup_*/
 github_chat_minimal/
+
+# Maestro E2E
+test-results/

@@ -10,7 +10,9 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:kami_face_oracle/core/integration_test_flags.dart';
 import 'package:kami_face_oracle/services/notification_launch_router.dart';
 import 'package:kami_face_oracle/push/firebase_messaging_background.dart';
+import 'package:kami_face_oracle/push/developer_reply_notification_id.dart';
 import 'package:kami_face_oracle/services/cloud_service.dart';
+import 'package:kami_face_oracle/services/developer_reply_notify_service.dart';
 import 'package:kami_face_oracle/services/fcm_token_repository.dart';
 
 /// 通知許可の状態（設定画面表示用）。
@@ -29,7 +31,7 @@ class NotificationPermissionStatus {
   final bool needsSystemSettings;
 }
 
-/// 開発者返信の FCM プッシュ通知（許可・トークン・表示・タップ遷移）。
+/// 創設者（占い師）返信の FCM プッシュ通知（許可・トークン・表示・タップ遷移）。
 class PushNotificationService {
   PushNotificationService._();
 
@@ -39,10 +41,10 @@ class PushNotificationService {
   static bool suppressForIntegrationTest = false;
 
   static const String _channelId = 'auraface_dev_reply';
-  static const String _channelName = '開発者からの返信';
+  static const String _channelName = '創設者（占い師）からの返信';
   static const String notificationTitle = 'AuraFaceから新しい導きが届きました';
   static const String notificationBody =
-      '開発者から返信が届いています。タップして確認してください。';
+      '創設者（占い師）から返信が届いています。タップして確認してください。';
 
   final FlutterLocalNotificationsPlugin _local = FlutterLocalNotificationsPlugin();
   bool _localReady = false;
@@ -164,15 +166,14 @@ class PushNotificationService {
       }
     });
 
+    _fcmReady = true;
+    debugPrint('[PushNotification] FCM initialized');
     unawaited(syncTokenNow());
 
     final initial = await messaging.getInitialMessage();
     if (initial != null && !NotificationLaunchRouter.skipOpeningSplash) {
       unawaited(_handleNotificationOpen(initial));
     }
-
-    _fcmReady = true;
-    debugPrint('[PushNotification] FCM initialized');
   }
 
   Future<void> dispose() async {
@@ -300,7 +301,10 @@ class PushNotificationService {
 
   /// ログイン後・相談送信後などから明示的にトークンを再登録する。
   Future<void> syncTokenNow() async {
-    if (!CloudService.isFirebaseAppReady || !_fcmReady) return;
+    if (!CloudService.isFirebaseAppReady) return;
+    if (!_fcmReady) {
+      await _initFcm();
+    }
     final token = await _getFcmTokenWithRetry();
     await _persistToken(token);
   }
@@ -328,7 +332,12 @@ class PushNotificationService {
   }
 
   /// ローカル通知（フォアグラウンド／Watchdog 用）。
-  Future<void> showDeveloperReplyLocal({required String chatId}) async {
+  /// [messageCreatedAt] / [messageId] ごとに別 ID にし、同一スレッドの2通目以降も音が鳴るようにする。
+  Future<void> showDeveloperReplyLocal({
+    required String chatId,
+    int? messageCreatedAt,
+    int? messageId,
+  }) async {
     await ensureLocalReady();
 
     final enabled = await areSystemNotificationsEnabled();
@@ -337,17 +346,26 @@ class PushNotificationService {
       return;
     }
 
+    final notificationId = developerReplyNotificationId(
+      chatId: chatId,
+      messageCreatedAt: messageCreatedAt,
+      messageId: messageId,
+    );
+
     // ignore: avoid_print
-    print('[PushNotification] showing local notification chatId=$chatId');
+    print(
+      '[PushNotification] showing local notification chatId=$chatId '
+      'notificationId=$notificationId createdAt=$messageCreatedAt messageId=$messageId',
+    );
     await _local.show(
-      chatId.hashCode,
+      notificationId,
       notificationTitle,
       notificationBody,
       NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
-          channelDescription: '開発者からの占い相談返信',
+          channelDescription: '創設者（占い師）からの占い相談返信',
           importance: Importance.max,
           priority: Priority.high,
           playSound: true,
@@ -382,7 +400,7 @@ class PushNotificationService {
         const AndroidNotificationChannel(
           _channelId,
           _channelName,
-          description: '開発者からの占い相談返信',
+          description: '創設者（占い師）からの占い相談返信',
           importance: Importance.max,
           playSound: true,
           enableVibration: true,
@@ -419,21 +437,31 @@ class PushNotificationService {
 
   Future<void> _onForegroundMessage(RemoteMessage message) async {
     if (!_isDeveloperReply(message)) return;
-    debugPrint('[PushNotification] foreground dev_reply chatId=${message.data['chatId']}');
+    final chatId = message.data['chatId']?.toString() ?? '';
+    final messageCreatedAt = parseDevReplyCreatedAt(message.data);
+    final messageId = parseDevReplyMessageId(message.data);
+    debugPrint(
+      '[PushNotification] foreground dev_reply chatId=$chatId '
+      'createdAt=$messageCreatedAt messageId=$messageId',
+    );
 
     if (message.notification != null && Platform.isIOS) return;
 
     await ensureLocalReady();
-    final chatId = message.data['chatId']?.toString() ?? '';
+    final notificationId = developerReplyNotificationId(
+      chatId: chatId,
+      messageCreatedAt: messageCreatedAt,
+      messageId: messageId,
+    );
     await _local.show(
-      message.hashCode,
+      notificationId,
       message.notification?.title ?? notificationTitle,
       message.notification?.body ?? notificationBody,
       NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
-          channelDescription: '開発者からの占い相談返信',
+          channelDescription: '創設者（占い師）からの占い相談返信',
           importance: Importance.max,
           priority: Priority.high,
           playSound: true,
@@ -444,6 +472,13 @@ class PushNotificationService {
       ),
       payload: chatId.isNotEmpty ? chatId : null,
     );
+    if (chatId.isNotEmpty) {
+      await DeveloperReplyNotifyService.markNotifiedFromRemote(
+        chatId: chatId,
+        messageCreatedAt: messageCreatedAt,
+        messageId: messageId,
+      );
+    }
   }
 
   void _onNotificationOpened(RemoteMessage message) {

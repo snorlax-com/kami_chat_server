@@ -40,7 +40,7 @@ class PlayBillingErrorMapper {
         return playConnectionFailed;
       case 'developerError':
       case 'DEVELOPER_ERROR':
-        return 'アプリの課金設定に問題があります。開発者へお問い合わせください。';
+        return 'アプリの課金設定に問題があります。創設者（占い師）へお問い合わせください。';
       default:
         if (detail.contains('not licensed') || detail.contains('not installed')) {
           return 'Play ストアからアプリをインストールし、内部テストのテスターアカウントでログインしてください。';

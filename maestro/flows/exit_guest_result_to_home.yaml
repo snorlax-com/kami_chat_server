@@ -1,0 +1,20 @@
+appId: com.auraface.kami_face_oracle
+---
+# 性格診断結果（ゲスト）からホームタブシェルへ
+- runFlow:
+      when:
+          visible: "性格診断結果"
+      commands:
+          - tapOn:
+                id: "maestro_guest_result_back"
+                optional: true
+          - tapOn:
+                text: "戻る"
+                optional: true
+          - extendedWaitUntil:
+                visible: "ログインせずに終了しますか？"
+                timeout: 20000
+          - tapOn: "終了する"
+- extendedWaitUntil:
+      visible: "設定（ログイン・ログアウト）を開く"
+      timeout: 90000

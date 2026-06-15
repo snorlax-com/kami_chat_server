@@ -2,7 +2,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 
-/// ホームの赤丸バッジ用。開発者（role=dev）メッセージで未読があるか。
+/// ホームの赤丸バッジ用。創設者（占い師）（role=dev）メッセージで未読があるか。
 class DeveloperChatUnreadService {
   DeveloperChatUnreadService._();
 

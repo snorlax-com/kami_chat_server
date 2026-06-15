@@ -14,7 +14,10 @@ fi
 echo "既存アプリのデータ削除（アンインストール）..."
 adb uninstall com.auraface.kami_face_oracle 2>/dev/null || true
 
-echo "リリース APK をビルドしてインストール..."
-flutter install --release
+echo "リリース APK をクリーンビルド..."
+flutter build apk --release
+
+echo "実機へインストール..."
+adb install -r build/app/outputs/flutter-apk/app-release.apk
 
 echo "完了しました。"

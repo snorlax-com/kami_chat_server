@@ -99,7 +99,7 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
     if (ok) {
       await PushNotificationService.instance.syncTokenNow();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('通知が許可されました。開発者からの返信をお知らせします。')),
+        const SnackBar(content: Text('通知が許可されました。創設者（占い師）からの返信をお知らせします。')),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -207,7 +207,7 @@ class _HomeAccountSettingsPageState extends State<HomeAccountSettingsPage>
             ),
             const SizedBox(height: 8),
             Text(
-              '開発者から占い相談への返信があったとき、お知らせします。',
+              '創設者（占い師）から占い相談への返信があったとき、お知らせします。',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.white70,
                   ),

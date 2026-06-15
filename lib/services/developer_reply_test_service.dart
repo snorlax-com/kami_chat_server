@@ -7,7 +7,7 @@ import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/services/developer_reply_notify_service.dart';
 import 'package:kami_face_oracle/services/push_notification_service.dart';
 
-/// 実機で開発者返信→通知の動作確認用。
+/// 実機で創設者（占い師）返信→通知の動作確認用。
 class DeveloperReplyTestService {
   DeveloperReplyTestService._();
 
@@ -21,11 +21,14 @@ class DeveloperReplyTestService {
         '通知がオフです。設定アプリで AuraFace の「通知」をオンにしてから、もう一度お試しください。',
       );
     }
-    await PushNotificationService.instance.showDeveloperReplyLocal(chatId: chatId);
+    await PushNotificationService.instance.showDeveloperReplyLocal(
+      chatId: chatId,
+      messageCreatedAt: DateTime.now().millisecondsSinceEpoch,
+    );
     debugPrint('[DevReplyTest] local notification shown');
   }
 
-  /// 本番サーバーへ開発者返信を送り、続けてポーリングで通知する。
+  /// 本番サーバーへ創設者（占い師）返信を送り、続けてポーリングで通知する。
   static Future<String> sendTestDevReplyOnServer() async {
     final chatId = await DeveloperChatPref.getActiveChatId();
     if (chatId == null || chatId.isEmpty) {
@@ -47,7 +50,7 @@ class DeveloperReplyTestService {
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
             'chatId': chatId,
-            'text': '【テスト】開発者からの返信です。通知確認用メッセージです。',
+            'text': '【テスト】創設者（占い師）からの返信です。通知確認用メッセージです。',
           }),
         )
         .timeout(const Duration(seconds: 60));
@@ -68,7 +71,7 @@ class DeveloperReplyTestService {
 
     final pushHint = body.contains('"push"') ? body : '(push詳細なし＝サーバー未更新の可能性)';
     return notified
-        ? '開発者テスト返信を送信し、通知を表示しました。\n$pushHint'
-        : '開発者テスト返信は送信済みですが、通知はスキップされました（既読扱いまたは同一メッセージ）。\nホームタブに移動して「状態を再確認」してください。\n$pushHint';
+        ? '創設者（占い師）テスト返信を送信し、通知を表示しました。\n$pushHint'
+        : '創設者（占い師）テスト返信は送信済みですが、通知はスキップされました（既読扱いまたは同一メッセージ）。\nホームタブに移動して「状態を再確認」してください。\n$pushHint';
   }
 }

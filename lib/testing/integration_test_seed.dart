@@ -49,8 +49,15 @@ class IntegrationTestSeed {
 
   /// Play 購入ボトムシート確認用（2回目以降の券購入可・テスト購入ダイアログなし）。
   static Future<void> seedForPlayBillingSheetTest() async {
+    await IntegrationTestFlags.clearRuntimeFlags();
+    await IntegrationTestFlags.enableConsultationMailTestMode();
     await seedSubscribedWithNoTickets();
-    await ConsultationSendHistoryService.markFirstConsultationCompleted();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_id', ConsultationIdentity.integrationTestUid);
+    await prefs.setBool(
+      'consult_first_send_completed_v1_${ConsultationIdentity.integrationTestUid}',
+      true,
+    );
   }
 
   static const normalThreadChatId =

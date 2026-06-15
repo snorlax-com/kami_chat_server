@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:kami_face_oracle/config/play_billing_products.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/services/auth_api_headers.dart';
+import 'package:kami_face_oracle/services/billing_account_status.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
 
 /// Google Play 購入をサーバーで検証してから券付与の根拠とする。
@@ -13,8 +14,36 @@ class BillingServerSyncService {
 
   static String get _base => AuraFaceChatMailService.effectiveDefaultBaseUrl;
 
-  /// サーバー検証成功時のみ true。トークン欠落・検証失敗・二重送信は false。
-  static Future<bool> verifyPurchaseOnServer({
+  static Map<String, String> _authJsonHeaders(Map<String, String> auth) => {
+        'Content-Type': 'application/json',
+        ...auth,
+      };
+
+  /// サーバー上のアカウント別残高・サブスク状態。
+  static Future<BillingAccountStatus?> fetchStatus() async {
+    final authHeaders = await AuthApiHeaders.authorizationJson();
+    if (!authHeaders.containsKey('Authorization')) return null;
+
+    final uri = Uri.parse('$_base/api/billing/status');
+    try {
+      final res = await http
+          .get(uri, headers: authHeaders)
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        BillingLog.error('fetchStatus failed status=${res.statusCode}');
+        return null;
+      }
+      final body = jsonDecode(res.body) as Map<String, dynamic>?;
+      if (body == null) return null;
+      return BillingAccountStatus.fromJson(body);
+    } catch (e, st) {
+      BillingLog.error('fetchStatus network error', e, st);
+      return null;
+    }
+  }
+
+  /// サーバー検証成功時に残高を返す。失敗時 null。
+  static Future<BillingAccountStatus?> verifyPurchaseOnServer({
     required String productId,
     required String purchaseToken,
     required bool isSubscription,
@@ -22,13 +51,13 @@ class BillingServerSyncService {
     final playProductId = PlayBillingProducts.playStoreProductId(productId);
     if (purchaseToken.isEmpty) {
       BillingLog.warn('verifyPurchase skipped: empty purchaseToken');
-      return false;
+      return null;
     }
 
     final authHeaders = await AuthApiHeaders.authorizationJson();
     if (!authHeaders.containsKey('Authorization')) {
       BillingLog.warn('verifyPurchase skipped: not signed in');
-      return false;
+      return null;
     }
 
     final productType = isSubscription ? 'subs' : 'inapp';
@@ -43,23 +72,51 @@ class BillingServerSyncService {
       final res = await http
           .post(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              ...authHeaders,
-            },
+            headers: _authJsonHeaders(authHeaders),
             body: body,
           )
           .timeout(const Duration(seconds: 30));
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
         BillingLog.purchase('server verify ok product=$playProductId');
-        return true;
+        final json = jsonDecode(res.body) as Map<String, dynamic>?;
+        if (json != null) return BillingAccountStatus.fromJson(json);
+        return const BillingAccountStatus(normal: 0, urgent: 0, subscribed: false);
       }
       BillingLog.error('verifyPurchase failed status=${res.statusCode}');
-      return false;
+      return null;
     } catch (e, st) {
       BillingLog.error('verifyPurchase network error', e, st);
-      return false;
+      return null;
+    }
+  }
+
+  /// サーバーで券を消費し、更新後の残高を返す。
+  static Future<BillingAccountStatus?> consumeTickets({
+    required String type,
+    required int amount,
+  }) async {
+    final authHeaders = await AuthApiHeaders.authorizationJson();
+    if (!authHeaders.containsKey('Authorization')) return null;
+
+    final uri = Uri.parse('$_base/api/billing/consume');
+    try {
+      final res = await http
+          .post(
+            uri,
+            headers: _authJsonHeaders(authHeaders),
+            body: jsonEncode({'type': type, 'amount': amount}),
+          )
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final json = jsonDecode(res.body) as Map<String, dynamic>?;
+        if (json != null) return BillingAccountStatus.fromJson(json);
+      }
+      BillingLog.error('consumeTickets failed status=${res.statusCode}');
+      return null;
+    } catch (e, st) {
+      BillingLog.error('consumeTickets network error', e, st);
+      return null;
     }
   }
 
@@ -94,10 +151,7 @@ class BillingServerSyncService {
       final res = await http
           .post(
             uri,
-            headers: {
-              'Content-Type': 'application/json',
-              ...authHeaders,
-            },
+            headers: _authJsonHeaders(authHeaders),
             body: body,
           )
           .timeout(const Duration(seconds: 25));

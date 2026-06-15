@@ -313,7 +313,7 @@ function getThreadLastMessageAtMs(chatId) {
   return Number.isNaN(n) ? null : n;
 }
 
-/** 開発者返信など userId 無しで時刻だけ進める（行が無ければ何もしない） */
+/** 創設者（占い師）返信など userId 無しで時刻だけ進める（行が無ければ何もしない） */
 function bumpThreadLastMessageAtMs(chatId, createdAtMs) {
   if (!chatId || createdAtMs == null) return;
   const ms = Number(createdAtMs);
@@ -402,6 +402,53 @@ function resolveUserIdForChat(chatId) {
   return m ? m[1] : null;
 }
 
+function sumTicketBalance(userId, type) {
+  if (!userId || !type) return 0;
+  const db = getDb();
+  const row = db
+    .prepare(
+      `select coalesce(sum(amount), 0) as total from tickets where user_id = ? and type = ?`
+    )
+    .get(String(userId), String(type));
+  return Number(row?.total ?? 0);
+}
+
+function getBillingStatusForUser(userId) {
+  const uid = String(userId || "").trim();
+  if (!uid) {
+    return { normal: 0, urgent: 0, subscribed: false };
+  }
+  const db = getDb();
+  const sub = db
+    .prepare(
+      `select id from subscriptions where user_id = ? and status = 'active' limit 1`
+    )
+    .get(uid);
+  return {
+    normal: sumTicketBalance(uid, "normal"),
+    urgent: sumTicketBalance(uid, "urgent"),
+    subscribed: !!sub,
+  };
+}
+
+function consumeTicketsForUser(userId, type, amount) {
+  const uid = String(userId || "").trim();
+  const t = String(type || "").trim();
+  const n = Number(amount);
+  if (!uid || !t || !Number.isFinite(n) || n <= 0) {
+    throw new Error("invalid consume args");
+  }
+  const balance = sumTicketBalance(uid, t);
+  if (balance < n) {
+    return { ok: false, error: "insufficient_tickets", balance };
+  }
+  const db = getDb();
+  db.prepare(
+    `insert into tickets (user_id, type, amount, created_at) values (?, ?, ?, ?)`
+  ).run(uid, t, -n, new Date().toISOString());
+  return { ok: true, balance: balance - n };
+}
+
 module.exports = {
   getDb,
   upsertUser,
@@ -421,4 +468,7 @@ module.exports = {
   listFcmDeviceTokensForUser,
   removeFcmDeviceToken,
   resolveUserIdForChat,
+  sumTicketBalance,
+  getBillingStatusForUser,
+  consumeTicketsForUser,
 };

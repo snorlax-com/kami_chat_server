@@ -70,10 +70,12 @@ class IntegrationTestFlags {
       String.fromEnvironment('INTEGRATION_TEST_CAMERA_ROUTE', defaultValue: 'false') == 'true';
 
   static Completer<void>? _googleSignInHang;
+  static bool _googleSignInCancelled = false;
 
   /// integration_test: Google ログインを意図的に待機させ、戻るキャンセルを検証する。
   static Future<void> armGoogleSignInHangForTest() async {
     _googleSignInHang = Completer<void>();
+    _googleSignInCancelled = false;
   }
 
   static bool get hasGoogleSignInHang => _googleSignInHang != null;
@@ -82,12 +84,16 @@ class IntegrationTestFlags {
     final gate = _googleSignInHang;
     if (gate == null) return;
     await gate.future;
+    if (_googleSignInCancelled) {
+      throw StateError('integration_test_google_sign_in_cancelled');
+    }
   }
 
   static void cancelGoogleSignInHangForTest() {
+    _googleSignInCancelled = true;
     final gate = _googleSignInHang;
     if (gate != null && !gate.isCompleted) {
-      gate.completeError(StateError('integration_test_google_sign_in_cancelled'));
+      gate.complete();
     }
     _googleSignInHang = null;
   }

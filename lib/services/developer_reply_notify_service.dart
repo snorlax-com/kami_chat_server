@@ -1,49 +1,96 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:kami_face_oracle/services/bridge_thread_local_store.dart';
 import 'package:kami_face_oracle/services/auraface_chat_mail_service.dart';
 import 'package:kami_face_oracle/services/consultation_tab_visibility.dart';
 import 'package:kami_face_oracle/services/developer_chat_pref.dart';
+import 'package:kami_face_oracle/services/developer_reply_notify_prefs.dart';
 import 'package:kami_face_oracle/services/push_notification_service.dart';
 
-/// 開発者返信の検知とローカル通知（lastSeen とは独立）。
+/// 創設者（占い師）返信の検知とローカル通知（lastSeen とは独立）。
 class DeveloperReplyNotifyService {
   DeveloperReplyNotifyService._();
 
-  static const _prefsKeyLastNotifiedMs = 'dev_reply_local_notify_ms_v1';
+  static bool _pollInFlight = false;
 
   static Future<int> lastNotifiedMs() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_prefsKeyLastNotifiedMs) ?? 0;
+    // 互換用（テスト等）。複数スレッド対応後は per-key 管理を使う。
+    return 0;
   }
 
-  static Future<void> _setLastNotifiedMs(int ms) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_prefsKeyLastNotifiedMs, ms);
+  /// FCM 受信後にポーリング側の重複通知を防ぐ。
+  static Future<void> markNotifiedFromRemote({
+    required String chatId,
+    int? messageCreatedAt,
+    int? messageId,
+  }) async {
+    if (messageCreatedAt != null && messageCreatedAt > 0) {
+      await DeveloperReplyNotifyPrefs.markNotified(
+        chatId: chatId,
+        messageCreatedAt: messageCreatedAt,
+      );
+      return;
+    }
+    if (messageId != null && messageId > 0) {
+      await DeveloperReplyNotifyPrefs.markNotified(
+        chatId: chatId,
+        messageCreatedAt: messageId,
+      );
+    }
   }
 
-  /// 新しい開発者返信があれば通知（ユーザーが相談画面を見ていないとき）。
+  /// 新しい創設者（占い師）返信があれば通知（ユーザーが相談画面を見ていないとき）。
   static Future<bool> notifyIfNeeded({
     required String chatId,
     required int maxDevCreatedAt,
     bool force = false,
   }) async {
     if (maxDevCreatedAt <= 0) return false;
-    if (!force && ConsultationTabVisibility.userIsViewingConsultation) return false;
 
-    final lastNotified = await lastNotifiedMs();
-    if (!force && maxDevCreatedAt <= lastNotified) return false;
+    final alreadyNotified = await DeveloperReplyNotifyPrefs.wasNotified(
+      chatId: chatId,
+      messageCreatedAt: maxDevCreatedAt,
+    );
+    if (!force && alreadyNotified) return false;
 
-    await PushNotificationService.instance.showDeveloperReplyLocal(chatId: chatId);
-    await _setLastNotifiedMs(maxDevCreatedAt);
+    if (!force && ConsultationTabVisibility.userIsViewingConsultation) {
+      await DeveloperReplyNotifyPrefs.markNotified(
+        chatId: chatId,
+        messageCreatedAt: maxDevCreatedAt,
+      );
+      return false;
+    }
+
+    await PushNotificationService.instance.showDeveloperReplyLocal(
+      chatId: chatId,
+      messageCreatedAt: maxDevCreatedAt,
+    );
+    await DeveloperReplyNotifyPrefs.markNotified(
+      chatId: chatId,
+      messageCreatedAt: maxDevCreatedAt,
+    );
     debugPrint('[DevReplyNotify] local notification chatId=$chatId maxDev=$maxDevCreatedAt');
     return true;
   }
 
-  /// アクティブな相談スレッドをポーリングし、開発者返信があれば通知する。
+  /// アクティブな相談スレッドをポーリングし、創設者（占い師）返信があれば通知する。
   static Future<void> pollAndNotify() async {
-    final chatId = await DeveloperChatPref.getActiveChatId();
-    if (chatId == null || chatId.isEmpty) return;
-    await pollAndNotifyOnce(chatId: chatId);
+    if (_pollInFlight) return;
+    _pollInFlight = true;
+    try {
+      final chatIds = <String>{};
+      final active = await DeveloperChatPref.getActiveChatId();
+      if (active != null && active.isNotEmpty) chatIds.add(active);
+      try {
+        chatIds.addAll(await BridgeThreadLocalStore.listCachedChatIds());
+      } catch (_) {}
+
+      for (final chatId in chatIds) {
+        await pollAndNotifyOnce(chatId: chatId);
+      }
+    } finally {
+      _pollInFlight = false;
+    }
   }
 
   /// 指定 chatId のスレッドを確認して通知。戻り値は通知を表示したか。

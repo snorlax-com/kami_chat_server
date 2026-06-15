@@ -4,6 +4,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/config/play_billing_products.dart';
 import 'package:kami_face_oracle/main_runner_io.dart' as app;
+import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
+import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 import 'package:kami_face_oracle/testing/integration_test_seed.dart';
 
 /// ストア購入タップで「テスト購入」ではなく Google Play 課金（launchBillingFlow）へ進むこと。
@@ -14,6 +16,8 @@ void main() {
     AppNavigation.pendingReturnToConsultationAfterTicketStore = false;
     await IntegrationTestSeed.seedForPlayBillingSheetTest();
     await app.runAppAsync();
+    await ConsultationSubscriptionService.setActive(true);
+    await ConsultationTicketService.setBalances(normal: 0, priority: 0);
 
     await tester.pump();
     await tester.pump(const Duration(seconds: 2));
@@ -28,6 +32,7 @@ void main() {
         await tester.pump();
       }
     }
+    expect(find.byKey(const Key('consultation_send_button')), findsOneWidget);
 
     final inputFinder = find.byKey(const Key('consultation_message_input'));
     final sendFinder = find.byKey(const Key('consultation_send_button'));

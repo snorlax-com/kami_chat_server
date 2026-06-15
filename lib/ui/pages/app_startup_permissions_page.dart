@@ -108,7 +108,7 @@ class _AppStartupPermissionsPageState extends State<AppStartupPermissionsPage> {
         builder: (ctx) => AlertDialog(
           title: const Text('通知の許可'),
           content: const Text(
-            '開発者からの占い相談への返信をお知らせするには、'
+            '創設者（占い師）からの占い相談への返信をお知らせするには、'
             '端末の設定で AuraFace の「通知」をオンにしてください。\n\n'
             '「設定を開く」をタップして通知を有効にしたあと、このアプリに戻ってください。',
           ),
@@ -192,7 +192,7 @@ class _AppStartupPermissionsPageState extends State<AppStartupPermissionsPage> {
               const _PermissionCard(
                 icon: Icons.notifications_outlined,
                 title: '通知',
-                body: '開発者からの占い相談への返信をお知らせするために使用します。',
+                body: '創設者（占い師）からの占い相談への返信をお知らせするために使用します。',
               ),
               const Spacer(),
               SizedBox(

@@ -1,0 +1,24 @@
+appId: com.auraface.kami_face_oracle
+---
+# アプリ起動・クラッシュなし・性格診断結果まで到達
+- launchApp:
+    clearState: true
+    permissions:
+      all: allow
+- extendedWaitUntil:
+    visible: "I am 18 or older"
+    timeout: 90000
+- tapOn: "I am 18 or older"
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- extendedWaitUntil:
+    visible: "E2E: 撮影シミュレーション中"
+    timeout: 60000
+    optional: true
+- runFlow: flows/advance_tutorial_intro.yaml
+- runFlow: flows/complete_tutorial_camera.yaml
+- extendedWaitUntil:
+    visible: "性格診断結果"
+    timeout: 240000
+- assertNotVisible:
+    text: "エラー"
+    optional: true

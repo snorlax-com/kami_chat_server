@@ -277,6 +277,8 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
       return _detailUnlocked;
     }
     try {
+      // ログイン UI 表示前に guest_session_id を確保（claim 時の「セッション不足」防止）
+      await GuestSessionService.ensureGuestSessionId();
       final cred = await AurafaceAuthService.signInWithGoogle().timeout(
         const Duration(seconds: 60),
         onTimeout: () {
@@ -331,64 +333,81 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
     }
   }
 
+  Future<void> _unlockDetailAfterLogin({
+    required bool showSuccessSnack,
+    required String snackMessage,
+    Color snackColor = Colors.green,
+    Duration snackDuration = const Duration(seconds: 5),
+  }) async {
+    try {
+      await TutorialDiagnosisLocalStore.saveResultJson(jsonEncode(_effective.toJson()));
+    } catch (_) {}
+    await TutorialDiagnosisLocalStore.setUnlocked(true);
+    if (!mounted) return;
+    setState(() => _detailUnlocked = true);
+    if (showSuccessSnack) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(snackMessage),
+          backgroundColor: snackColor,
+          duration: snackDuration,
+        ),
+      );
+    }
+  }
+
   Future<void> _runClaim(User user, {bool showSuccessSnack = true}) async {
     try {
       final token = await user.getIdToken();
-      final gid = await GuestSessionService.readStoredId();
-      if (token == null || gid == null || gid.isEmpty) {
-        throw Exception('セッション情報が不足しています');
+      if (token == null || token.isEmpty) {
+        throw Exception('認証トークンを取得できませんでした');
       }
+      final gid = await GuestSessionService.ensureGuestSessionId();
+
+      if (gid.startsWith('guest_local_')) {
+        await _unlockDetailAfterLogin(
+          showSuccessSnack: showSuccessSnack,
+          snackMessage: 'ログインしました。オフラインのため診断結果はこの端末に保存されます。',
+          snackColor: const Color(0xFF92400E),
+          snackDuration: const Duration(seconds: 8),
+        );
+        return;
+      }
+
       await DiagnosisApiService.claimGuestData(guestSessionId: gid, idToken: token);
-      await TutorialDiagnosisLocalStore.setUnlocked(true);
-      if (mounted) {
-        setState(() => _detailUnlocked = true);
-        if (showSuccessSnack) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('診断結果をアカウントに保存しました。'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      }
+      await _unlockDetailAfterLogin(
+        showSuccessSnack: showSuccessSnack,
+        snackMessage: '診断結果をアカウントに保存しました。',
+      );
     } catch (e) {
       if (!mounted) return;
       final s = e.toString();
-      // 本番 Render が古く identity API が無いとき claim が 404 になる（ログで多発）
-      final isServerIdentityUnavailable = s.contains('claim failed: 404') ||
+      final isRecoverable = s.contains('claim failed: 404') ||
           s.contains('claim failed: 502') ||
           s.contains('claim failed: 503') ||
-          s.contains('Cannot POST /api/auth/claim-guest-data');
-      if (isServerIdentityUnavailable) {
-        try {
-          await TutorialDiagnosisLocalStore.saveResultJson(jsonEncode(_effective.toJson()));
-        } catch (_) {}
-        await TutorialDiagnosisLocalStore.setUnlocked(true);
-        if (!mounted) return;
-        setState(() => _detailUnlocked = true);
-        if (showSuccessSnack) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'ログインは成功しました。サーバーに診断保存APIがまだ無いため、この端末のみで詳細を表示します。'
-                '（kami_chat_server を再デプロイするとクラウド保存できます）',
-              ),
-              backgroundColor: Color(0xFF92400E),
-              duration: Duration(seconds: 12),
-            ),
-          );
-        }
+          s.contains('claim failed: 400') ||
+          s.contains('Cannot POST /api/auth/claim-guest-data') ||
+          s.contains('TimeoutException') ||
+          s.contains('SocketException') ||
+          s.contains('Failed host lookup') ||
+          s.contains('Connection refused') ||
+          s.contains('401') ||
+          s.toLowerCase().contains('unauthorized');
+      if (isRecoverable) {
+        final msg = s.contains('401') || s.toLowerCase().contains('unauthorized')
+            ? 'ログインしました。サーバー連携は未設定のため、この端末で詳細を表示します。'
+            : 'ログインしました。クラウド保存はできませんでしたが、この端末で詳細を表示します。';
+        await _unlockDetailAfterLogin(
+          showSuccessSnack: showSuccessSnack,
+          snackMessage: msg,
+          snackColor: const Color(0xFF92400E),
+          snackDuration: const Duration(seconds: 10),
+        );
         return;
       }
-      final isUnauthorized =
-          s.contains('401') || s.toLowerCase().contains('unauthorized');
-      final msg = isUnauthorized
-          ? 'Google ログインは成功しましたが、サーバーが Firebase トークンを検証できませんでした。'
-              'kami_chat_server に FIREBASE_SERVICE_ACCOUNT_JSON（サービスアカウント JSON）を設定して再デプロイしてください。'
-          : '保存に失敗しました: $e';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(msg),
+          content: Text('保存に失敗しました: $e'),
           backgroundColor: Colors.red.shade800,
           duration: const Duration(seconds: 12),
         ),
@@ -510,15 +529,25 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
           title: const Text('性格診断結果'),
           automaticallyImplyLeading: false,
           leading: _isGuestLockedFlow
-              ? IconButton(
-                  key: const Key('guest-result-back-button'),
-                  icon: const Icon(Icons.arrow_back),
-                  tooltip: '戻る',
-                  onPressed: () => unawaited(_handleGuestBackOrExit(forcePrompt: true)),
+              ? Semantics(
+                  identifier: 'maestro_guest_result_back',
+                  label: '戻る',
+                  button: true,
+                  child: IconButton(
+                    key: const Key('guest-result-back-button'),
+                    icon: const Icon(Icons.arrow_back),
+                    tooltip: '戻る',
+                    onPressed: () => unawaited(_handleGuestBackOrExit(forcePrompt: true)),
+                  ),
                 )
-              : BackButton(
-                  key: const Key('guest-result-back-button'),
-                  onPressed: () => Navigator.of(context).maybePop(),
+              : Semantics(
+                  identifier: 'maestro_guest_result_back',
+                  label: '戻る',
+                  button: true,
+                  child: BackButton(
+                    key: const Key('guest-result-back-button'),
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
                 ),
           flexibleSpace: Container(
             decoration: BoxDecoration(

@@ -1,0 +1,24 @@
+appId: com.auraface.kami_face_oracle
+---
+# 設定画面（アカウント削除 UI は未実装のため解約手順・ログアウトを検証）
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/go_settings.yaml
+- assertVisible: "ログアウト"
+- assertVisible: "解約手順について"
+- assertNotVisible:
+    text: "アカウント削除"
+    optional: true
+- tapOn: "解約手順について"
+- extendedWaitUntil:
+    visible: "解約手順について"
+    timeout: 15000
+- assertVisible: "月額サブスク（定期購入）の解約は、Google Play から行います"
+- assertVisible:
+    text: "Google Play"
+    optional: true
+- back
+- assertVisible: "設定"

@@ -93,7 +93,7 @@ app.get("/health", (req, res) => {
   });
 });
 
-// --- POST /api/chat/send（保存 + Resend で開発者Gmail。メール失敗時も 200 + mailSent:false）
+// --- POST /api/chat/send（保存 + Resend で創設者（占い師）Gmail。メール失敗時も 200 + mailSent:false）
 app.post("/api/chat/send", requireAuth, async (req, res) => {
   try {
     pruneChatMessagesInStore();
@@ -323,7 +323,7 @@ app.get("/api/chat/thread", requireAuth, (req, res) => {
   res.json({ status: "ok", chatId, messages: messagesOut, retentionExpired });
 });
 
-// テスト用: 開発者返信を追加（本番では無効）
+// テスト用: 創設者（占い師）返信を追加（本番では無効）
 app.post("/api/chat/dev-reply", requireAuth, requireAdmin, async (req, res) => {
   if (process.env.NODE_ENV === "production") {
     return res.status(404).json({ status: "error", message: "not found" });
@@ -347,7 +347,12 @@ app.post("/api/chat/dev-reply", requireAuth, requireAdmin, async (req, res) => {
   console.log("[chat/dev-reply]", { chatId: cid, messageLength: msg.length });
   let push = { skipped: true, reason: "pending" };
   try {
-    push = await sendDeveloperReplyPush({ chatId: cid, messageId: id, role: "dev" });
+    push = await sendDeveloperReplyPush({
+      chatId: cid,
+      messageId: id,
+      role: "dev",
+      createdAt,
+    });
   } catch (e) {
     console.error("[chat/dev-reply] push failed", e);
     push = { ok: false, error: String(e.message || e) };
@@ -406,7 +411,7 @@ app.get("/admin/reply", (req, res) => {
     `;
 
     for (const r of sorted) {
-      const who = r.role === "dev" ? "開発者" : "ユーザー";
+      const who = r.role === "dev" ? "創設者（占い師）" : "ユーザー";
       html += `
         <div class="msg ${escapeHtml(r.role)}">
           <div><b>${escapeHtml(who)}</b></div>
@@ -466,7 +471,12 @@ app.post("/admin/reply", requireAdminOrMailToken, async (req, res) => {
 
     console.log("[admin/reply POST] saved dev message", { chatId, len: text.length });
     try {
-      const push = await sendDeveloperReplyPush({ chatId, messageId: id, role: "dev" });
+      const push = await sendDeveloperReplyPush({
+        chatId,
+        messageId: id,
+        role: "dev",
+        createdAt,
+      });
       console.log("[admin/reply POST] push", push);
     } catch (e) {
       console.error("[admin/reply POST] push failed", e);

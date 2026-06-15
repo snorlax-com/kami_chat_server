@@ -1,0 +1,4 @@
+appId: com.auraface.kami_face_oracle
+---
+- runFlow: advance_tutorial_intro.yaml
+- runFlow: exit_guest_result_to_home.yaml

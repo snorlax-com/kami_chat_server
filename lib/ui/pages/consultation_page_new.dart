@@ -169,7 +169,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
       // 定期ポーリングを開始
       _startPolling(response.cid!);
 
-      // 開発者へGmail通知（メールブリッジ）。URL未設定時は本番URL or ローカルを使用
+      // 創設者（占い師）へGmail通知（メールブリッジ）。URL未設定時は本番URL or ローカルを使用
       final savedUrl = prefs.getString(AuraFaceChatMailService.prefKeyBaseUrl);
       final bridgeUrl = AuraFaceChatMailService.consultationSendBaseUrl(savedUrl);
       bool? mailSent;
@@ -206,7 +206,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                '相談は送信しましたが、開発者へのGmail通知に失敗しました。サーバー（Render）のメール環境変数を確認してください。$detail',
+                '相談は送信しましたが、創設者（占い師）へのGmail通知に失敗しました。サーバー（Render）のメール環境変数を確認してください。$detail',
               ),
               backgroundColor: Colors.deepOrange,
               duration: const Duration(seconds: 8),
@@ -246,7 +246,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                '$coinLine。開発者へのメール通知はサーバー応答では確認できません。'
+                '$coinLine。創設者（占い師）へのメール通知はサーバー応答では確認できません。'
                 'kami-chat-server を最新にデプロイしてください。',
               ),
               backgroundColor: Colors.amber.shade800,
@@ -276,7 +276,7 @@ class _ConsultationPageNewState extends State<ConsultationPageNew> {
         title: const Text('占い相談'),
         actions: [
           IconButton(
-            tooltip: '開発者とのやりとり',
+            tooltip: '創設者（占い師）とのやりとり',
             icon: const Icon(Icons.forum_outlined),
             onPressed: () {
               Navigator.push(

@@ -16,6 +16,7 @@ import 'package:kami_face_oracle/services/push_notification_service.dart';
 import 'package:kami_face_oracle/services/guest_session_service.dart';
 import 'package:kami_face_oracle/services/remote_config_service.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
+import 'package:kami_face_oracle/services/billing_account_service.dart';
 import 'package:kami_face_oracle/services/iap_service.dart';
 import 'package:kami_face_oracle/services/background_music_service.dart';
 import 'package:kami_face_oracle/core/personality_mapping_table.dart';
@@ -36,6 +37,7 @@ Future<void> _runDeferredInitIo() async {
   await GuestSessionService.ensureGuestSessionId();
   await RemoteConfigService.instance.init();
   BillingLog.info('deferred init: starting IAP');
+  await BillingAccountService.init();
   await IAPService.instance.init();
   await BackgroundMusicService().initialize();
   await PersonalityMappingTable.initialize();

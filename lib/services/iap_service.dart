@@ -9,11 +9,11 @@ import 'package:kami_face_oracle/services/tutorial_subscribe_retake_service.dart
 import 'package:kami_face_oracle/config/consultation_subscription_config.dart';
 import 'package:kami_face_oracle/config/play_billing_products.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
+import 'package:kami_face_oracle/services/billing_account_service.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/services/billing_server_sync_service.dart';
 import 'package:kami_face_oracle/services/consultation_subscription_service.dart';
 import 'package:kami_face_oracle/services/consultation_ticket_packs_service.dart';
-import 'package:kami_face_oracle/services/consultation_ticket_service.dart';
 import 'package:kami_face_oracle/services/iap_purchase_ack_store.dart';
 import 'package:kami_face_oracle/services/play_billing_error_mapper.dart';
 import 'package:kami_face_oracle/services/play_install_service.dart';
@@ -337,8 +337,26 @@ class IAPService {
     _playSubscriptionVerified = active;
     BillingLog.info('syncSubscription active=$active verified=$_playSubscriptionVerified');
 
+    if (BillingAccountService.canUseServerBilling) {
+      await BillingAccountService.syncFromServer();
+      active = await ConsultationSubscriptionService.isActive();
+    } else {
+      final wasActive = await ConsultationSubscriptionService.isActive();
+      await ConsultationSubscriptionService.setActive(active);
+      if (!wasActive && active) {
+        final bonus = await SubscriptionBonusService.grantFirstBonusIfEligible();
+        onSubscriptionUpdated?.call(true, bonusTickets: bonus);
+        await TutorialSubscribeRetakeService.onSubscriptionActivated(
+          wasSubscribedBefore: wasActive,
+        );
+      } else if (wasActive != active) {
+        onSubscriptionUpdated?.call(active, bonusTickets: 0);
+        AppNavigation.notifyStoreAccessChanged();
+      }
+      return;
+    }
+
     final wasActive = await ConsultationSubscriptionService.isActive();
-    await ConsultationSubscriptionService.setActive(active);
     if (!wasActive && active) {
       final bonus = await SubscriptionBonusService.grantFirstBonusIfEligible();
       onSubscriptionUpdated?.call(true, bonusTickets: bonus);
@@ -391,12 +409,10 @@ class IAPService {
         await _acknowledgeIfNeeded(purchase);
 
         if (PlayBillingProducts.isSubscriptionProduct(productId)) {
-          final wasActive = await ConsultationSubscriptionService.isActive();
-          await ConsultationSubscriptionService.setActive(true);
           _playSubscriptionVerified = true;
           onSubscriptionUpdated?.call(true, bonusTickets: result.bonusTickets);
           await TutorialSubscribeRetakeService.onSubscriptionActivated(
-            wasSubscribedBefore: wasActive,
+            wasSubscribedBefore: await ConsultationSubscriptionService.isActive(),
           );
         }
         if (result.ticketsGranted > 0) {
@@ -451,10 +467,12 @@ class IAPService {
       purchaseToken: token,
       isSubscription: isSub,
     );
-    if (!verified) {
+    if (verified == null) {
       BillingLog.warn('grant skipped: server verify failed product=$productId');
       return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
     }
+
+    await BillingAccountService.applyStatus(verified);
 
     unawaited(
       BillingServerSyncService.syncPurchaseAudit(
@@ -469,9 +487,8 @@ class IAPService {
     );
 
     if (isSub) {
-      final bonus = await SubscriptionBonusService.grantFirstBonusIfEligible();
-      BillingLog.purchase('subscription active firstBonus=$bonus');
-      return (ticketsGranted: bonus, bonusTickets: bonus, isUrgent: false);
+      BillingLog.purchase('subscription verified via server');
+      return (ticketsGranted: verified.normal, bonusTickets: 0, isUrgent: false);
     }
 
     final pack = ConsultationTicketPacksService.getPackById(productId);
@@ -480,15 +497,12 @@ class IAPService {
       return (ticketsGranted: 0, bonusTickets: 0, isUrgent: false);
     }
 
-    if (pack.isUrgent) {
-      await ConsultationTicketService.addPriorityTickets(pack.tickets);
-      BillingLog.purchase('granted urgent ${pack.tickets}');
-      return (ticketsGranted: pack.tickets, bonusTickets: 0, isUrgent: true);
-    }
-
-    await ConsultationTicketService.addNormalTickets(pack.tickets);
-    BillingLog.purchase('granted normal ${pack.tickets}');
-    return (ticketsGranted: pack.tickets, bonusTickets: 0, isUrgent: false);
+    BillingLog.purchase('granted via server ${pack.tickets} ${pack.ticketType.name}');
+    return (
+      ticketsGranted: pack.tickets,
+      bonusTickets: 0,
+      isUrgent: pack.isUrgent,
+    );
   }
 
   static String? _extractPurchaseToken(PurchaseDetails purchase) {

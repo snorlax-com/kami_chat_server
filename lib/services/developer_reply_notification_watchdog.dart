@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/services/developer_reply_notify_service.dart';
 
-/// バックグラウンド時の開発者返信ポーリング（既読にしない専用サービスへ委譲）。
+/// バックグラウンド時の創設者（占い師）返信ポーリング（既読にしない専用サービスへ委譲）。
 class DeveloperReplyNotificationWatchdog {
   DeveloperReplyNotificationWatchdog._();
 

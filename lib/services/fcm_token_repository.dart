@@ -30,7 +30,7 @@ class FcmTokenRepository {
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    if (CloudService.isFirebaseAppReady) {
+    if (CloudService.firestoreUsable) {
       try {
         await FirebaseFirestore.instance
             .collection('users')
@@ -40,6 +40,12 @@ class FcmTokenRepository {
             .set(data, SetOptions(merge: true));
         debugPrint('[FcmToken] Firestore saved users/$uid/fcm_tokens/$docId');
       } catch (e) {
+        final es = e.toString();
+        if (es.contains('PERMISSION_DENIED') ||
+            es.contains('API has not been used') ||
+            es.contains('Firestore API')) {
+          CloudService.markFirestoreUnavailable(e);
+        }
         debugPrint('[FcmToken] Firestore save failed: $e');
       }
     }
@@ -57,7 +63,7 @@ class FcmTokenRepository {
     required String token,
   }) async {
     final docId = docIdForToken(token);
-    if (CloudService.isFirebaseAppReady) {
+    if (CloudService.firestoreUsable) {
       try {
         await FirebaseFirestore.instance
             .collection('users')
@@ -66,6 +72,12 @@ class FcmTokenRepository {
             .doc(docId)
             .delete();
       } catch (e) {
+        final es = e.toString();
+        if (es.contains('PERMISSION_DENIED') ||
+            es.contains('API has not been used') ||
+            es.contains('Firestore API')) {
+          CloudService.markFirestoreUnavailable(e);
+        }
         debugPrint('[FcmToken] Firestore delete failed: $e');
       }
     }

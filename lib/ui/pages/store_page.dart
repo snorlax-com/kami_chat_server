@@ -17,6 +17,7 @@ import 'package:kami_face_oracle/services/store_ui_helper.dart';
 import 'package:kami_face_oracle/services/store_access_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
 import 'package:kami_face_oracle/services/subscription_management_service.dart';
+import 'package:kami_face_oracle/services/billing_account_service.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/ui/pages/store_locked_page.dart';
 import 'package:kami_face_oracle/config/urgent_consultation_guide.dart';
@@ -165,6 +166,7 @@ class _StorePageState extends State<StorePage> {
       await PlayInstallService.ensureLoaded();
       if (mounted) setState(() => _isSideloadInstall = PlayInstallService.isSideloadInstall);
       await _iap.refreshCatalog();
+      await BillingAccountService.syncFromServer();
     }
     final normal = await ConsultationTicketService.normalTickets();
     final urgent = await ConsultationTicketService.priorityTickets();
@@ -388,6 +390,26 @@ class _StorePageState extends State<StorePage> {
       return '商品情報を読み込み中…（Play Console 登録・反映を確認）';
     }
     return 'Google Play 課金: 準備中';
+  }
+
+  Future<void> _restorePurchases() async {
+    BillingLog.info('store restorePurchases tapped');
+    await _iap.restorePurchases();
+    await BillingAccountService.syncFromServer();
+    if (!mounted) return;
+    StoreUiHelper.showSnack('購入情報を確認しました');
+    await _load();
+  }
+
+  Widget _buildRestorePurchasesButton() {
+    if (!_iap.isAvailable || _canUseSideloadTest) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton(
+        onPressed: () => unawaited(_restorePurchases()),
+        child: const Text('購入を復元'),
+      ),
+    );
   }
 
   Widget _buildBillingBanner() {
@@ -651,6 +673,7 @@ class _StorePageState extends State<StorePage> {
                 ),
               ),
               _buildBillingBanner(),
+              _buildRestorePurchasesButton(),
               if (_lastBillingError != null)
                 Container(
                   width: double.infinity,

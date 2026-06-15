@@ -1,0 +1,26 @@
+appId: com.auraface.kami_face_oracle
+---
+# チュートリアルイントロ（AuraFaceの世界へようこそ）を最後まで進める
+- runFlow:
+    when:
+      visible: "AuraFaceの世界へようこそ"
+    commands:
+      - repeat:
+          times: 5
+          commands:
+            - tapOn: "次へ"
+- runFlow:
+    when:
+      visible: "始める"
+    commands:
+      - tapOn: "始める"
+# 旧フロー: 陽占画面からイントロへ
+- runFlow:
+    when:
+      visible: "陽占（チュートリアル）"
+    commands:
+      - tapOn: "チュートリアルを開始"
+- extendedWaitUntil:
+    visible: "椅子に座り"
+    timeout: 60000
+    optional: true

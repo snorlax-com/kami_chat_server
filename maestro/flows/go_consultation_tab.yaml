@@ -1,0 +1,10 @@
+appId: com.auraface.kami_face_oracle
+---
+- runFlow: go_home_tab.yaml
+- tapOn: "占い相談"
+- tapOn:
+    point: "30%,95%"
+    optional: true
+- extendedWaitUntil:
+    visible: "送信"
+    timeout: 90000

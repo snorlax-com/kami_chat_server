@@ -18,6 +18,7 @@ import 'package:kami_face_oracle/services/developer_chat_pref.dart';
 import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/config/consultation_send_contract.dart';
 import 'package:kami_face_oracle/ui/pages/store_page.dart';
+import 'package:kami_face_oracle/services/billing_account_service.dart';
 import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/services/pillar_interaction_seed_store.dart';
 import 'package:kami_face_oracle/app_navigation.dart';
@@ -127,7 +128,7 @@ void _showMailSentFeedback(
   if (useFirestore) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('$coinLine。開発者に通知しました。$extraUrgent'),
+        content: Text('$coinLine。創設者（占い師）に通知しました。$extraUrgent'),
         backgroundColor: Colors.green,
         duration: Duration(seconds: urgent ? 8 : 4),
       ),
@@ -135,7 +136,7 @@ void _showMailSentFeedback(
   } else {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('$coinLine。開発者にメールで通知しました。$extraUrgent'),
+        content: Text('$coinLine。創設者（占い師）にメールで通知しました。$extraUrgent'),
         backgroundColor: Colors.green,
         duration: Duration(seconds: urgent ? 8 : 4),
       ),
@@ -143,7 +144,7 @@ void _showMailSentFeedback(
   }
 }
 
-/// 占い相談（初回＝相談券）と開発者返信（メールブリッジ）のチャット。
+/// 占い相談（初回＝相談券）と創設者（占い師）返信（メールブリッジ）のチャット。
 class DeveloperChatPage extends StatefulWidget {
   const DeveloperChatPage({super.key, this.embedInShell = false});
 
@@ -579,7 +580,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     await _loadThread(silent: false, scrollToLatest: true);
   }
 
-  /// チャット行（開発者／柱／あなた）
+  /// チャット行（創設者（占い師）／柱／あなた）
   Widget _chatMessageBubble({
     required bool isLeft,
     required String roleLabel,
@@ -630,7 +631,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
     );
   }
 
-  /// 開発者とのやり取り（時系列・開いたら末尾＝最新へスクロール）
+  /// 創設者（占い師）とのやり取り（時系列・開いたら末尾＝最新へスクロール）
   Widget _buildActiveThreadMessages() {
     final visible = _visibleMessages;
     if (_loading && visible.isEmpty) {
@@ -660,7 +661,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
             : visible[index];
         return _chatMessageBubble(
           isLeft: m.isFromDev,
-          roleLabel: m.isFromDev ? '開発者' : 'あなた',
+          roleLabel: m.isFromDev ? '創設者（占い師）' : 'あなた',
           text: m.text,
           pillarLeftStyle: false,
         );
@@ -797,10 +798,14 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
                     ),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    key: const Key('consultation_send_button'),
-                    onPressed: canSend ? () => unawaited(_onSendPressed()) : null,
-                    child: const Icon(Icons.send, size: 20),
+                  Semantics(
+                    label: '送信',
+                    button: true,
+                    child: FilledButton(
+                      key: const Key('consultation_send_button'),
+                      onPressed: canSend ? () => unawaited(_onSendPressed()) : null,
+                      child: const Icon(Icons.send, size: 20),
+                    ),
                   ),
                 ],
               ),
@@ -1120,9 +1125,17 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
       await ConsultationSendHistoryService.markFirstConsultationCompleted();
     }
     if (ticketKind == ConsultationSendTicketKind.urgent) {
-      await ConsultationTicketService.consumeUrgentTicket();
+      final err = await BillingAccountService.consumeUrgentForSend();
+      if (err != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+        return;
+      }
     } else {
-      await ConsultationTicketService.consumeNormalTicket();
+      final err = await BillingAccountService.consumeNormalForSend();
+      if (err != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+        return;
+      }
     }
     await _loadAccessState();
     await DeveloperChatPref.clearConsultationDraft();
@@ -1454,7 +1467,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'サーバーには保存されましたが、開発者へのGmail通知に失敗した可能性があります。$detail',
+              'サーバーには保存されましたが、創設者（占い師）へのGmail通知に失敗した可能性があります。$detail',
             ),
             backgroundColor: Colors.deepOrange,
             duration: const Duration(seconds: 10),
@@ -1494,7 +1507,7 @@ class _DeveloperChatPageState extends State<DeveloperChatPage> with WidgetsBindi
         final isConfigError = e is StateError && e.message.contains('MAIL_BRIDGE_URL');
         final isLocal = e.toString().contains('Connection refused') && _isLocalhostUrl(bridgeForCatch);
         final message = isConfigError
-            ? '開発者通知の接続先が設定されていない可能性があります。'
+            ? '創設者（占い師）通知の接続先が設定されていない可能性があります。'
             : isLocal
                 ? 'ローカルURLには接続できません。本番用URLを指定してください。'
                 : (useFirestore

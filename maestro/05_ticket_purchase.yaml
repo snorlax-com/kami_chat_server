@@ -1,0 +1,37 @@
+appId: com.auraface.kami_face_oracle
+---
+# 券購入（サブスク加入済みが前提。sideload debug はテスト購入）
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/go_store_tab.yaml
+# 未加入時はロック画面
+- runFlow:
+    when:
+      visible: "ストアはサブスクご加入中のみ"
+    commands:
+      - assertVisible: "ストアはサブスクご加入中のみご利用いただけます"
+      - runFlow: flows/go_consultation_tab.yaml
+- runFlow:
+    when:
+      visible: "通常質問券"
+    commands:
+      - assertVisible: "通常質問券 1枚"
+      - assertVisible: "¥600"
+      - assertVisible: "至急質問券 1枚"
+      - assertVisible: "¥10000"
+      - tapOn: "購入"
+      - extendedWaitUntil:
+          visible: "テスト購入"
+          timeout: 15000
+          optional: true
+      - tapOn:
+          text: "テスト購入"
+          optional: true
+      - extendedWaitUntil:
+          visible: "Google Play"
+          timeout: 30000
+          optional: true
+      - back

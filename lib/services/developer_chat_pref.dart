@@ -3,7 +3,7 @@ import 'package:kami_face_oracle/config/consultation_mail_types.dart';
 import 'package:kami_face_oracle/services/consultation_chat_id.dart';
 import 'package:kami_face_oracle/services/consultation_identity.dart';
 
-/// メールブリッジ上の「最新の相談スレッド」IDと、開発者返信の既読位置。
+/// メールブリッジ上の「最新の相談スレッド」IDと、創設者（占い師）返信の既読位置。
 /// アカウント（bridge userId）ごとに SharedPreferences を分離する。
 class DeveloperChatPref {
   DeveloperChatPref._();

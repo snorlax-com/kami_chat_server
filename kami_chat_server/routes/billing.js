@@ -11,7 +11,7 @@ const androidPublisher = google.androidpublisher("v3");
 const PRODUCT_ALIASES = {
   ticket_normal_600: "normal_ticket_600",
   ticket_urgent_10000: "urgent_ticket_10000",
-  subscription_monthly_500: "monthly_subscription_500",
+  monthly_subscription_500: "subscription_monthly_500",
 };
 
 function canonicalProductId(productId) {
@@ -87,6 +87,36 @@ function grantSubscriptionBenefit(userId, productId, purchaseToken) {
   return Promise.resolve({ duplicate: false });
 }
 
+router.get("/api/billing/status", requireAuth, (req, res) => {
+  const userId = req.user.userId;
+  const status = idb.getBillingStatusForUser(userId);
+  res.json({ ok: true, ...status });
+});
+
+router.post("/api/billing/consume", requireAuth, (req, res) => {
+  const userId = req.user.userId;
+  const { type, amount } = req.body || {};
+  const ticketType = String(type || "").trim();
+  const n = Number(amount ?? 1);
+  if (ticketType !== "normal" && ticketType !== "urgent") {
+    return res.status(400).json({ error: "type は normal または urgent です。" });
+  }
+  try {
+    const result = idb.consumeTicketsForUser(userId, ticketType, n);
+    if (!result.ok) {
+      return res.status(409).json({
+        error: "券が不足しています。",
+        balance: result.balance,
+      });
+    }
+    const status = idb.getBillingStatusForUser(userId);
+    res.json({ ok: true, ...status });
+  } catch (e) {
+    console.error("billing consume error", e);
+    res.status(500).json({ error: "券の消費に失敗しました。" });
+  }
+});
+
 router.post("/api/billing/verify", requireAuth, async (req, res) => {
   const { productId, purchaseToken, productType } = req.body || {};
   const userId = req.user.userId;
@@ -132,7 +162,8 @@ router.post("/api/billing/verify", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "productType が不正です。" });
     }
 
-    res.json({ ok: true });
+    const status = idb.getBillingStatusForUser(userId);
+    res.json({ ok: true, ...status });
   } catch (err) {
     console.error("billing verify error", { message: err.message });
     res.status(500).json({ error: "購入検証に失敗しました。" });

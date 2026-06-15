@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 開発者返信 + FCM プッシュ送信の検証
+ * 創設者（占い師）返信 + FCM プッシュ送信の検証
  * node scripts/test-dev-reply-push.js [BASE_URL] [userId]
  */
 const http = require("http");
@@ -53,7 +53,7 @@ function request(method, path, body) {
 
   const dev = await request("POST", "/api/chat/dev-reply", {
     chatId,
-    text: "開発者テスト返信（通知確認用）",
+    text: "創設者（占い師）テスト返信（通知確認用）",
   });
   console.log("dev-reply", dev.status, dev.body);
 

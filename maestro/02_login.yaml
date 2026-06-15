@@ -1,0 +1,37 @@
+appId: com.auraface.kami_face_oracle
+---
+# Google ログイン UI（実際の Google アカウント選択はテスト端末の手動/テストアカウント前提）
+- launchApp:
+      stopApp: false
+      permissions:
+          all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/exit_guest_result_to_home.yaml
+- runFlow: flows/go_settings.yaml
+- tapOn: "ログイン"
+- extendedWaitUntil:
+      visible: "Googleで続ける"
+      timeout: 15000
+- assertVisible: "Googleで続ける"
+- assertVisible:
+      text: "Google でサインインすると"
+      optional: true
+# ログイン実行（エミュレーターに Google アカウントが登録されている場合のみ完了）
+- tapOn:
+      text: "Googleで続ける"
+      optional: true
+- extendedWaitUntil:
+      visible: "ログインしました"
+      timeout: 60000
+      optional: true
+- runFlow:
+      when:
+          visible: "Googleで続ける"
+      commands:
+          - back
+- runFlow:
+      when:
+          visible: "設定"
+      commands:
+          - back
+- runFlow: flows/go_home_tab.yaml

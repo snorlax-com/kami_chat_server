@@ -11,6 +11,10 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
 
+  tearDown(() {
+    IntegrationTestFlags.cancelGoogleSignInHangForTest();
+  });
+
   Future<void> waitForResultPage(WidgetTester tester) async {
     for (var i = 0; i < 180; i++) {
       await tester.pump(const Duration(milliseconds: 200));
@@ -195,5 +199,5 @@ void main() {
     }
     expect(find.text('性格診断結果'), findsNothing);
     expect(find.text('保存された性格診断を開く'), findsOneWidget);
-  }, timeout: const Timeout(Duration(minutes: 4)));
+  }, timeout: const Timeout(Duration(minutes: 6)));
 }

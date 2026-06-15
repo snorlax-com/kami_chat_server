@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * 送信→受信(開発者返信)→送信 の一連の流れが正しく反映されるかテストする。
+ * 送信→受信(創設者（占い師）返信)→送信 の一連の流れが正しく反映されるかテストする。
  * 1. ユーザー送信
  * 2. スレッド取得（1件: user）
- * 3. 開発者返信（dev-reply）
+ * 3. 創設者（占い師）返信（dev-reply）
  * 4. スレッド取得（2件: user, dev）
  * 5. ユーザー再送信
  * 6. スレッド取得（3件: user, dev, user）→ 内容・順序を検証
@@ -111,12 +111,12 @@ async function run() {
     fail(`thread1 message mismatch: ${JSON.stringify(msgs1[0])}`);
   console.log("OK: 1 message (user):", msgs1[0].text);
 
-  // 3. 開発者返信
+  // 3. 創設者（占い師）返信
   step++;
-  console.log(`\n--- Step ${step}: POST /api/chat/dev-reply (開発者返信) ---`);
+  console.log(`\n--- Step ${step}: POST /api/chat/dev-reply (創設者（占い師）返信) ---`);
   const devReply = await request("POST", "/api/chat/dev-reply", {
     chatId,
-    text: "開発者からの返信です",
+    text: "創設者（占い師）からの返信です",
   });
   if (devReply.status !== 200) fail(`dev-reply status ${devReply.status}: ${JSON.stringify(devReply.body)}`);
   console.log("OK:", devReply.body);
@@ -130,7 +130,7 @@ async function run() {
   if (msgs2.length !== 2) fail(`thread2 expected 2 messages, got ${msgs2.length}`);
   if (msgs2[0].role !== "user" || msgs2[0].text !== "1通目ユーザー送信")
     fail(`thread2[0] mismatch: ${JSON.stringify(msgs2[0])}`);
-  if (msgs2[1].role !== "dev" || msgs2[1].text !== "開発者からの返信です")
+  if (msgs2[1].role !== "dev" || msgs2[1].text !== "創設者（占い師）からの返信です")
     fail(`thread2[1] mismatch: ${JSON.stringify(msgs2[1])}`);
   console.log("OK: 2 messages (user, dev)");
 
@@ -160,7 +160,7 @@ async function run() {
   if (msgs3.length !== 3) fail(`thread3 expected 3 messages, got ${msgs3.length}`);
   const expected = [
     { role: "user", text: "1通目ユーザー送信" },
-    { role: "dev", text: "開発者からの返信です" },
+    { role: "dev", text: "創設者（占い師）からの返信です" },
     { role: "user", text: "2通目ユーザー送信" },
   ];
   for (let i = 0; i < 3; i++) {

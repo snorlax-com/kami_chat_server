@@ -1,0 +1,41 @@
+appId: com.auraface.kami_face_oracle
+---
+# エラー処理: クラッシュせずダイアログ/スナックが出ること
+- launchApp:
+    stopApp: false
+    permissions:
+      all: allow
+- runFlow: flows/dismiss_startup_dialogs.yaml
+- runFlow: flows/go_consultation_tab.yaml
+- tapOn:
+    text: "メッセージを入力（送信時に券1枚）"
+    optional: true
+- inputText: "通信エラーテスト"
+- tapOn: "送信"
+- extendedWaitUntil:
+    visible:
+      text: ".*"
+    timeout: 30000
+- assertNotVisible:
+    text: "Unfortunately.*has stopped"
+    optional: true
+- assertNotVisible:
+    text: "クラッシュ"
+    optional: true
+# サブスク未加入時の案内（再試行導線）
+- runFlow:
+    when:
+      visible: "サブスクが必要です"
+    commands:
+      - assertVisible: "加入する"
+      - tapOn: "あとで"
+# 設定でログイン失敗時の再試行（未ログイン時）
+- runFlow: flows/go_settings.yaml
+- tapOn:
+    text: "ログイン"
+    optional: true
+- tapOn:
+    text: "Googleで続ける"
+    optional: true
+- back
+- back

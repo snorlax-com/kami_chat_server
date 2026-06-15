@@ -29,7 +29,7 @@ function ensureMailConfig() {
   const admin = (process.env.ADMIN_EMAIL || "").trim();
   if (!dev && !admin) {
     throw new Error(
-      "DEV_NOTIFICATION_EMAIL または ADMIN_EMAIL のいずれかを設定してください（開発者通知の主宛先）。"
+      "DEV_NOTIFICATION_EMAIL または ADMIN_EMAIL のいずれかを設定してください（創設者（占い師）通知の主宛先）。"
     );
   }
   if (!MAIL_FROM) {
