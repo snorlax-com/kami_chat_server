@@ -16,7 +16,7 @@ const { applySecurityMiddleware } = require("./securitySetup");
 const { requireAuth, requireAdmin, requireAdminOrMailToken } = require("./middleware/auth");
 const adminAuthRoutes = require("./routes/adminAuth");
 const billingRoutes = require("./routes/billing");
-const { createBillingRouter } = require("../server/billing_api");
+const { createBillingRouter } = require("./billing_api");
 const { verifyBearerToken } = require("./firebaseVerify");
 
 const app = express();
