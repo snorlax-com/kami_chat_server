@@ -22,6 +22,7 @@ import 'package:kami_face_oracle/services/billing_log.dart';
 import 'package:kami_face_oracle/ui/pages/store_locked_page.dart';
 import 'package:kami_face_oracle/config/urgent_consultation_guide.dart';
 import 'package:kami_face_oracle/ui/widgets/urgent_consultation_guide_card.dart';
+import 'package:kami_face_oracle/ui/widgets/play_internal_test_install_banner.dart';
 
 class StorePage extends StatefulWidget {
   const StorePage({
@@ -150,8 +151,15 @@ class _StorePageState extends State<StorePage> {
     }
   }
 
-  bool get _canUseSideloadTest =>
-      StoreBillingConfig.allowSideloadTestPurchases && _isSideloadInstall;
+  bool get _canUseSideloadTest => StoreBillingConfig.shouldUseSideloadTestPurchase(
+        isSideloadInstall: _isSideloadInstall,
+        billingAvailable: _iap.isAvailable,
+      );
+
+  bool get _showPlayInternalTestPrompt => StoreBillingConfig.shouldShowPlayInternalTestInstallPrompt(
+        isSideloadInstall: _isSideloadInstall,
+        billingReady: _iap.isPlayBillingReady,
+      );
 
   /// 占い相談の券不足から開いたストア（IndexedStack では forTicketPurchase が false のためフラグ併用）。
   bool get _fromConsultationTicketFlow =>
@@ -216,12 +224,18 @@ class _StorePageState extends State<StorePage> {
     final parts = <String>[
       PlayBillingErrorMapper.billingUnavailableMessage(catalogMissing: catalogMissing),
       if (_isSideloadInstall)
-        'ADB 直インストールの場合は Play Console の内部テスト版からインストールしてください。',
+        'ADB 直インストールでは Google Play 課金は使えません。Play Console の内部テスト版からインストールしてください。',
       if (_iap.notFoundProductIds.isNotEmpty)
         '未取得の商品ID: ${_iap.notFoundProductIds.join(", ")}',
       if (_canUseSideloadTest) 'テスト購入ボタンからフロー確認できます（実課金なし）。',
     ];
     StoreUiHelper.showSnack(parts.join('\n'), backgroundColor: Colors.orange.shade800);
+  }
+
+  Future<void> _showPlayUnavailableWithInstallOffer({bool catalogMissing = false}) async {
+    _showPlayUnavailableMessage(catalogMissing: catalogMissing);
+    if (!_isSideloadInstall || !mounted) return;
+    await StoreSubscriptionFlow.offerPlayStoreInstall(context);
   }
 
   Future<void> _purchasePackSideloadTest(ConsultationTicketPack pack) async {
@@ -324,7 +338,7 @@ class _StorePageState extends State<StorePage> {
     }
 
     if (!_iap.isAvailable) {
-      _showPlayUnavailableMessage();
+      await _showPlayUnavailableWithInstallOffer();
       return;
     }
 
@@ -337,7 +351,9 @@ class _StorePageState extends State<StorePage> {
       case StorePurchasePlayLaunchFailed():
       case StorePurchaseUnavailable():
         setState(() => _purchasingId = null);
-        _showPlayUnavailableMessage(catalogMissing: !_iap.isPackInCatalog(pack));
+        await _showPlayUnavailableWithInstallOffer(
+          catalogMissing: !_iap.isPackInCatalog(pack),
+        );
       case StorePurchaseAlreadySubscribed():
         setState(() => _purchasingId = null);
     }
@@ -495,7 +511,7 @@ class _StorePageState extends State<StorePage> {
                   : FilledButton(
                       onPressed: _iap.isAvailable || _canUseSideloadTest
                           ? () => unawaited(_purchaseSubscription())
-                          : () => _showPlayUnavailableMessage(),
+                          : () => unawaited(_showPlayUnavailableWithInstallOffer()),
                       child: Text(_canUseSideloadTest ? 'テスト加入' : 'サブスクに加入'),
                     ),
         ),
@@ -672,6 +688,7 @@ class _StorePageState extends State<StorePage> {
                   ],
                 ),
               ),
+              if (_showPlayInternalTestPrompt) const PlayInternalTestInstallBanner(),
               _buildBillingBanner(),
               _buildRestorePurchasesButton(),
               if (_lastBillingError != null)

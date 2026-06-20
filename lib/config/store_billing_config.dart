@@ -14,7 +14,24 @@ class StoreBillingConfig {
   /// release Android では Play で検証できたサブスクのみ有効。
   static bool get requirePlayVerifiedAccess => preferGooglePlay && !kDebugMode;
 
-  /// Play 商品未取得かつ sideload インストール時、明示確認付きテスト購入を許可。
+  /// debug + sideload のみ。release 実機では Play 課金を強制しテスト購入ダイアログは出さない。
   static bool get allowSideloadTestPurchases =>
-      preferGooglePlay && !IntegrationTestFlags.forcePlayBilling;
+      preferGooglePlay && kDebugMode && !IntegrationTestFlags.forcePlayBilling;
+
+  /// Play Billing が使えない debug sideload 向けテスト購入のみ。
+  static bool shouldUseSideloadTestPurchase({
+    required bool isSideloadInstall,
+    required bool billingAvailable,
+  }) =>
+      allowSideloadTestPurchases && isSideloadInstall && !billingAvailable;
+
+  /// release の ADB 直インストールで Play 課金案内を出す。
+  static bool shouldShowPlayInternalTestInstallPrompt({
+    required bool isSideloadInstall,
+    required bool billingReady,
+  }) =>
+      preferGooglePlay &&
+      !kDebugMode &&
+      isSideloadInstall &&
+      !billingReady;
 }

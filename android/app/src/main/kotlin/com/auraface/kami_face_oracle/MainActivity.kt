@@ -120,7 +120,8 @@ class MainActivity : FlutterActivity() {
     private fun resolveInstallerPackageName(): String? {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                packageManager.getInstallSourceInfo(packageName).installingPackageName
+                val info = packageManager.getInstallSourceInfo(packageName)
+                info.installingPackageName ?: info.initiatingPackageName
             } else {
                 @Suppress("DEPRECATION")
                 packageManager.getInstallerPackageName(packageName)

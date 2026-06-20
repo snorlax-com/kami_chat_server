@@ -33,8 +33,7 @@ class PersonalityDiagnosisResultPage extends StatefulWidget {
   State<PersonalityDiagnosisResultPage> createState() => _PersonalityDiagnosisResultPageState();
 }
 
-class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisResultPage>
-    with WidgetsBindingObserver {
+class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisResultPage> {
   String? _pillarId;
   String? _displayTypeName;
   String? _characterImagePath;
@@ -47,7 +46,6 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
   bool _tutorialPosted = false;
   bool _isOpeningDetail = false;
   int _loginAttemptId = 0;
-  bool _loginUiWasBackgrounded = false;
   StreamSubscription<User?>? _authSub;
 
   PersonalityTreeDiagnosisResult get _effective =>
@@ -66,7 +64,6 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     // ignore: avoid_print
     print(
       '[GuestExit] PersonalityDiagnosisResultPage init '
@@ -85,27 +82,8 @@ class _PersonalityDiagnosisResultPageState extends State<PersonalityDiagnosisRes
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _authSub?.cancel();
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_isOpeningDetail &&
-        (state == AppLifecycleState.inactive || state == AppLifecycleState.paused)) {
-      _loginUiWasBackgrounded = true;
-    }
-    if (state == AppLifecycleState.resumed && _loginUiWasBackgrounded) {
-      _loginUiWasBackgrounded = false;
-      final attemptAtResume = _loginAttemptId;
-      Future<void>.delayed(const Duration(milliseconds: 600), () {
-        if (!mounted) return;
-        if (attemptAtResume != _loginAttemptId) return;
-        if (!_isOpeningDetail || !_showGuestLock) return;
-        unawaited(_cancelGuestLoginAttempt());
-      });
-    }
   }
 
   bool _isLoginAttemptCurrent(int attemptId) => mounted && attemptId == _loginAttemptId;

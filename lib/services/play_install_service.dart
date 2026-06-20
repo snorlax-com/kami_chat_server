@@ -10,6 +10,11 @@ class PlayInstallService {
 
   static const _channel = MethodChannel('com.auraface.kami_face_oracle/billing');
 
+  static const _playInstallerPackages = {
+    'com.android.vending',
+    'com.google.android.feedback',
+  };
+
   static String? _installerPackage;
   static bool? _installedFromPlayStore;
 
@@ -29,7 +34,8 @@ class PlayInstallService {
     try {
       final raw = await _channel.invokeMethod<String>('getInstallerPackageName');
       _installerPackage = raw;
-      _installedFromPlayStore = raw == 'com.android.vending';
+      _installedFromPlayStore =
+          raw != null && _playInstallerPackages.contains(raw);
       debugPrint('[PlayInstallService] installer=$raw fromPlay=$_installedFromPlayStore');
     } catch (e) {
       debugPrint('[PlayInstallService] installer lookup failed: $e');

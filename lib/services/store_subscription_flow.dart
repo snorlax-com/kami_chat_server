@@ -25,11 +25,12 @@ class StoreSubscriptionFlow {
     await iap.ensureReady();
 
     final isSideload = PlayInstallService.isSideloadInstall;
-    final canUseSideloadTest =
-        StoreBillingConfig.allowSideloadTestPurchases && isSideload;
     final plan = StoreCatalogService.subscription;
 
-    if (canUseSideloadTest) {
+    if (StoreBillingConfig.shouldUseSideloadTestPurchase(
+      isSideloadInstall: isSideload,
+      billingAvailable: iap.isAvailable,
+    )) {
       await _purchaseSideloadTest(context, onPurchasingChanged: onPurchasingChanged);
       return;
     }
@@ -71,6 +72,11 @@ class StoreSubscriptionFlow {
         );
         if (await _offerOpenPlayStore(context)) return;
     }
+  }
+
+  /// sideload release など Play 課金が使えないとき、内部テスト版のインストールを案内。
+  static Future<bool> offerPlayStoreInstall(BuildContext context) async {
+    return _offerOpenPlayStore(context);
   }
 
   static Future<bool> _offerOpenPlayStore(BuildContext context) async {

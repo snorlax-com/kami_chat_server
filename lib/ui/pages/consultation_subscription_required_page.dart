@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:kami_face_oracle/app_navigation.dart';
 import 'package:kami_face_oracle/config/store_billing_config.dart';
+import 'package:kami_face_oracle/services/iap_service.dart';
 import 'package:kami_face_oracle/services/local_ticket_store_service.dart';
 import 'package:kami_face_oracle/services/play_install_service.dart';
 import 'package:kami_face_oracle/services/store_catalog_service.dart';
 import 'package:kami_face_oracle/services/store_subscription_flow.dart';
+import 'package:kami_face_oracle/ui/widgets/play_internal_test_install_banner.dart';
 
 /// 占い相談の送信時に、サブスク未加入ユーザーへ説明する画面。
 class ConsultationSubscriptionRequiredPage extends StatefulWidget {
@@ -20,6 +22,7 @@ class ConsultationSubscriptionRequiredPage extends StatefulWidget {
 class _ConsultationSubscriptionRequiredPageState extends State<ConsultationSubscriptionRequiredPage> {
   bool _busy = false;
   bool _showSideloadTestSubscribe = false;
+  bool _showPlayInternalTestPrompt = false;
 
   @override
   void initState() {
@@ -30,10 +33,18 @@ class _ConsultationSubscriptionRequiredPageState extends State<ConsultationSubsc
   Future<void> _load() async {
     await StoreCatalogService.ensureLoaded();
     await PlayInstallService.ensureLoaded();
+    final iap = IAPService.instance;
+    await iap.ensureReady();
     if (mounted) {
       setState(() {
-        _showSideloadTestSubscribe =
-            StoreBillingConfig.allowSideloadTestPurchases && PlayInstallService.isSideloadInstall;
+        _showSideloadTestSubscribe = StoreBillingConfig.shouldUseSideloadTestPurchase(
+          isSideloadInstall: PlayInstallService.isSideloadInstall,
+          billingAvailable: iap.isAvailable,
+        );
+        _showPlayInternalTestPrompt = StoreBillingConfig.shouldShowPlayInternalTestInstallPrompt(
+          isSideloadInstall: PlayInstallService.isSideloadInstall,
+          billingReady: iap.isPlayBillingReady,
+        );
       });
     }
   }
@@ -143,6 +154,10 @@ class _ConsultationSubscriptionRequiredPageState extends State<ConsultationSubsc
               _bullet('送信のたびに通常券または至急券を1枚消費します'),
               _bullet('2回目以降はストアで追加の券を購入できます'),
               const SizedBox(height: 28),
+              if (_showPlayInternalTestPrompt) ...[
+                const PlayInternalTestInstallBanner(compact: true),
+                const SizedBox(height: 16),
+              ],
               if (_busy)
                 const Center(child: CircularProgressIndicator())
               else ...[
