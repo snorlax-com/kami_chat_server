@@ -52,7 +52,7 @@ cd kami_face_oracle
 
 | 項目 | 値 |
 |------|-----|
-| 商品 ID | `monthly_subscription_500` |
+| 商品 ID | `subscription_monthly_500` |
 | 名前（ユーザー向け） | 例: 占い相談サブスク（月額） |
 | 説明 | サブスク加入でストア・占い相談が利用可能 |
 | 請求期間 | 1 か月 |
@@ -129,7 +129,19 @@ flutter build appbundle --release
 
 ```env
 GOOGLE_PLAY_PACKAGE_NAME=com.auraface.kami_face_oracle
-GOOGLE_APPLICATION_CREDENTIALS=./secure/google-service-account.json
+# ローカル: JSON ファイルパス
+GOOGLE_APPLICATION_CREDENTIALS=./secure/google-play-service-account.json
+# Render: Base64（npm run play:sa-b64 → npm run render:upsert-play-sa-b64）
+GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64=
+# 未設定時は FIREBASE_SERVICE_ACCOUNT_JSON_B64 にフォールバック（同一 SA を Play Console に招待すること）
+```
+
+ターミナルから Render へ反映:
+
+```bash
+cd kami_chat_server
+npm run render:upsert-play-package
+npm run render:upsert-play-sa-b64   # secrets/render-GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64.txt がある場合
 ```
 
 ---

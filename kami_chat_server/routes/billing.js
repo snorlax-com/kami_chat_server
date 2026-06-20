@@ -4,6 +4,10 @@ const express = require("express");
 const { google } = require("googleapis");
 const { requireAuth } = require("../middleware/auth");
 const idb = require("../identityDb");
+const {
+  loadGooglePlayCredentialsJson,
+  getGooglePlayPackageName,
+} = require("../googlePlayAuth");
 
 const router = express.Router();
 const androidPublisher = google.androidpublisher("v3");
@@ -20,8 +24,12 @@ function canonicalProductId(productId) {
 }
 
 async function getAuthClient() {
+  const credentials = loadGooglePlayCredentialsJson();
+  if (!credentials) {
+    throw new Error("Google Play credentials not configured");
+  }
   const auth = new google.auth.GoogleAuth({
-    keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    credentials,
     scopes: ["https://www.googleapis.com/auth/androidpublisher"],
   });
   return auth.getClient();
@@ -125,7 +133,7 @@ router.post("/api/billing/verify", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "購入情報が不足しています。" });
   }
 
-  const pkg = (process.env.GOOGLE_PLAY_PACKAGE_NAME || "").trim();
+  const pkg = getGooglePlayPackageName();
   if (!pkg) {
     return res.status(503).json({ error: "課金検証が設定されていません。" });
   }

@@ -12,6 +12,7 @@ const {
   isFirebaseConfigured,
   getFirebaseHealthSnapshot,
 } = require("./firebaseVerify");
+const { getGooglePlayHealthSnapshot } = require("./googlePlayAuth");
 const { applySecurityMiddleware } = require("./securitySetup");
 const { requireAuth, requireAdmin, requireAdminOrMailToken } = require("./middleware/auth");
 const adminAuthRoutes = require("./routes/adminAuth");
@@ -83,12 +84,17 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => {
   const fb = getFirebaseHealthSnapshot();
+  const play = getGooglePlayHealthSnapshot();
   res.json({
     ok: true,
     identityApi: true,
     firebaseAdmin: fb.firebaseAdmin,
     firebaseCredentialEnv: fb.firebaseCredentialEnv,
     firebaseInitFailureCode: fb.firebaseInitFailureCode,
+    googlePlayBillingReady: play.googlePlayBillingReady,
+    googlePlayPackageName: play.googlePlayPackageName,
+    googlePlayCredentialEnv: play.googlePlayCredentialEnv,
+    googlePlayInitFailureCode: play.googlePlayInitFailureCode,
     mailApiBuild: "v2-consultation-tier-r12-emergency-retry",
   });
 });

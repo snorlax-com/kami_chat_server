@@ -18,7 +18,10 @@
     "test:identity-api": "node scripts/identity-api-e2e.js",
     "test:all": "node --test test/*.test.js && node scripts/identity-api-e2e.js",
     "firebase:b64": "node scripts/firebase-service-account-to-b64.js",
-    "render:upsert-firebase-b64": "node scripts/render-upsert-env-from-file.js FIREBASE_SERVICE_ACCOUNT_JSON_B64 ./secrets/render-FIREBASE_SERVICE_ACCOUNT_JSON_B64.txt"
+    "play:sa-b64": "node scripts/play-service-account-to-b64.js",
+    "render:upsert-firebase-b64": "node scripts/render-upsert-env-from-file.js FIREBASE_SERVICE_ACCOUNT_JSON_B64 ./secrets/render-FIREBASE_SERVICE_ACCOUNT_JSON_B64.txt",
+    "render:upsert-play-package": "node scripts/render-upsert-env-value.js GOOGLE_PLAY_PACKAGE_NAME com.auraface.kami_face_oracle",
+    "render:upsert-play-sa-b64": "node scripts/render-upsert-env-from-file.js GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64 ./secrets/render-GOOGLE_PLAY_SERVICE_ACCOUNT_JSON_B64.txt"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",
